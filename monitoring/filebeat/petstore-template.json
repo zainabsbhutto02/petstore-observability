@@ -1,0 +1,24 @@
+{
+  "priority": 1000,
+  "index_patterns": ["petstore-final*"],
+  "data_stream": {},
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    },
+    "mappings": {
+      "properties": {
+        "time": {"type": "date"},
+        "service": {"type": "keyword"},
+        "severity": {"type": "keyword"},
+        "message": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+        "request_id": {"type": "keyword"},
+        "method": {"type": "keyword"},
+        "route": {"type": "keyword"},
+        "status_code": {"type": "integer"},
+        "duration_ms": {"type": "double"}
+      }
+    }
+  }
+}

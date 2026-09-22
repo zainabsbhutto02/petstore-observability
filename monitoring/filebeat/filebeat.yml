@@ -1,0 +1,35 @@
+filebeat.autodiscover:
+  providers:
+    - type: docker
+      host: unix:///var/run/docker.sock
+      templates:
+        - condition:
+            equals:
+              docker.container.labels.com.petstore.role: backend
+          config:
+            - type: filestream
+              id: petstore-backend-${data.docker.container.id}
+              paths:
+                - /var/lib/docker/containers/${data.docker.container.id}/*.log
+              parsers:
+                - container:
+                    stream: all
+                    format: docker
+              processors:
+                - decode_json_fields:
+                    fields: [message]
+                    target: ""
+                    overwrite_keys: true
+                    add_error_key: true
+
+processors:
+  - add_docker_metadata:
+      host: unix:///var/run/docker.sock
+
+setup.template.enabled: false
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "petstore-final"
+
+setup.ilm.enabled: false
+setup.kibana.host: "http://kibana:5601"

@@ -1,0 +1,40 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# React / Vite
+frontend/node_modules/
+frontend/dist/
+
+# Local SQLite runtime data
+data/*.db
+data/*.db-*
+data/*.db-wal
+data/*.db-shm
+
+# Local environment files and secrets
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+npm-debug.log*
+
+# Elastic Stack runtime data
+monitoring/filebeat/data/
+monitoring/filebeat/logs/
+
+# Local assistant workspace metadata
+.codex/
