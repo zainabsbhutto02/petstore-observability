@@ -2,6 +2,21 @@
 
 A small online pet store project built with a Flask API, SQLite persistence, and a React + Vite frontend, instrumented end-to-end with Prometheus, Grafana, and the Elastic Stack (Filebeat, Elasticsearch, Kibana).
 
+## Part A: Problem, users, and solution
+
+Small pet shops need a simple way to present products, track stock, accept orders, and complete them without the complexity of a full e-commerce platform. Paws & Cart is intended for a shop operator demonstrating these everyday workflows and for students learning how application behavior becomes observable.
+
+The React interface displays the catalogue and current orders. The Flask REST API validates purchases and completion requests, while SQLite persists products, stock, and orders. The surrounding monitoring and logging stack makes request performance, business activity, infrastructure usage, and application events inspectable.
+
+Current application features are:
+
+- browse six pet products and current stock;
+- create quantity-based orders with stock validation;
+- view pending and completed orders;
+- complete pending orders;
+- preserve application state in SQLite;
+- check backend health at `GET /health`.
+
 ## Current architecture
 
 - Frontend: React + Vite application served through nginx in a production container
@@ -52,6 +67,28 @@ docker compose stop
 
 Do not run `docker compose down -v`, `docker volume prune`, or `docker system prune` for routine shutdown — these delete stored metrics/log history.
 
+### Normal stop versus full reset
+
+A normal stop preserves SQLite, Prometheus, Grafana, and Elasticsearch data:
+
+```bash
+docker compose stop
+```
+
+Start the existing containers and retained data again with:
+
+```bash
+docker compose start
+```
+
+**Destructive full reset:** the following command removes the project containers and named volumes. It permanently deletes application data and stored observability history. Use it only when a completely fresh demonstration environment is intentionally required and after preserving any evidence you need:
+
+```bash
+docker compose down -v
+```
+
+Never use Docker-wide prune commands for project cleanup because they can affect unrelated applications.
+
 ## Service ports
 
 - Frontend: http://localhost:5173
@@ -61,6 +98,22 @@ Do not run `docker compose down -v`, `docker volume prune`, or `docker system pr
 - Kibana: http://localhost:5601
 - Elasticsearch: http://localhost:9200
 - Node Exporter: http://localhost:9100
+
+## Using the Pet Store
+
+Open http://localhost:5173 to use the React interface. Product cards show price and stock; choose a quantity and select **Buy**. The Orders section shows persisted orders and provides **Complete order** for pending orders.
+
+The same operations are available through the API:
+
+```bash
+curl http://localhost:5000/health
+curl http://localhost:5000/products
+curl http://localhost:5000/orders
+curl -X POST -H "Content-Type: application/json" -d '{"product_id":1,"quantity":1}' http://localhost:5000/orders
+curl -X POST http://localhost:5000/orders/1/complete
+```
+
+The two POST examples change persisted data. Use real order IDs returned by the API, and check stock before creating demonstration orders.
 
 ## Persistence
 
@@ -122,13 +175,16 @@ Grafana dashboards are provisioned as code and loaded automatically from the pro
 
 - Total successful orders: `petstore_orders_total`
 - Pending orders: `petstore_pending_orders`
-- Current request rate: `sum(rate(petstore_http_request_duration_seconds_count[5m]))`
 - Average order processing time: `1000 * rate(petstore_order_processing_seconds_sum[5m]) / rate(petstore_order_processing_seconds_count[5m])`
-- HTTP latency p95: `histogram_quantile(0.95, sum by (le) (rate(petstore_http_request_duration_seconds_bucket[5m])))`
-- HTTP latency p99: `histogram_quantile(0.99, sum by (le) (rate(petstore_http_request_duration_seconds_bucket[5m])))`
-- Self-explored route rate: `sum by (route) (rate(petstore_http_request_duration_seconds_count[5m]))`
+- Current application request rate: `sum(rate(petstore_http_request_duration_seconds_count{route!="/metrics"}[5m]))`
+- Orders created in rolling five-minute windows: `increase(petstore_orders_total[5m])`
+- Pending orders over time: `petstore_pending_orders`
+- Request rate by normalized route: `sum by (route) (rate(petstore_http_request_duration_seconds_count{route!="/metrics"}[5m]))`
+- Request rate by status code: `sum by (status_code) (rate(petstore_http_request_duration_seconds_count{route!="/metrics"}[5m]))`
+- Combined p95 latency series: `1000 * histogram_quantile(0.95, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route!="/metrics"}[5m])))`
+- Combined p99 latency series: `1000 * histogram_quantile(0.99, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route!="/metrics"}[5m])))`
 
-Note: these p95/p99 panels use a 5-minute rolling window (`[5m]`). This means a real, brief anomaly takes a few minutes to fully "age out" of the graph even after the underlying cause is fixed — the fix itself is instant, but the chart's smoothing window lags behind. See the anomaly experiment below for a concrete example of this.
+The user-facing HTTP panels exclude `/metrics`, preventing Prometheus's five-second self-scrapes from dominating application traffic. The p95 and p99 series share one panel and are displayed in milliseconds. Their `[5m]` range means each graph point uses samples from the preceding five minutes, so a brief anomaly remains visible until it ages out of that rolling window.
 
 #### System overview dashboard
 
@@ -140,7 +196,7 @@ Note: these p95/p99 panels use a 5-minute rolling window (`[5m]`). This means a 
 - Disk usage trend: `node_filesystem_size_bytes{fstype="ext4",mountpoint="/"} - node_filesystem_avail_bytes{fstype="ext4",mountpoint="/"}`
 - Network receive/transmit trend: `rate(node_network_receive_bytes_total[5m])` and `rate(node_network_transmit_bytes_total[5m])`
 
-These charts come from Node Exporter and represent the Docker Desktop host machine running the whole stack.
+With Docker Desktop on Windows, these charts describe the Linux environment/VM used by Docker Desktop to host the containers. They do not directly measure the physical Windows operating system.
 
 All four required metric types are covered: `petstore_orders_total` (Counter), `petstore_pending_orders` (Gauge), `petstore_http_request_duration_seconds` (Histogram), and `petstore_order_processing_seconds` (Summary).
 
@@ -149,12 +205,12 @@ All four required metric types are covered: `petstore_orders_total` (Counter), `
 Pipeline for backend HTTP events:
 
 ```text
-Flask JSON stdout -> Docker json-file log -> Filebeat -> Elasticsearch -> Kibana
+Flask structured JSON container stream -> Docker json-file log -> Filebeat -> Elasticsearch -> Kibana
 ```
 
 ### Structured application logging
 
-The logging formatter and request hooks are in `app.py`. Every backend HTTP request emits one JSON object to stdout with these fields:
+The logging formatter and request hooks are in `app.py`. Every backend HTTP request emits one JSON object through Python's logging `StreamHandler`, which writes to stderr by default. Docker captures this container stream. Each event contains:
 
 - `time`: UTC ISO-8601 timestamp
 - `service`: `pet-store`
@@ -169,7 +225,7 @@ The response always includes the same `X-Request-ID`. Flask URL rules are used f
 
 The backend service uses Docker's `json-file` logging driver with a 10 MiB / 3-file rotation limit. Filebeat reads Docker's log directory read-only and uses the read-only Docker socket only for metadata/discovery.
 
-`monitoring/filebeat/filebeat.yml` uses Docker autodiscover and accepts only containers with the Compose label `com.petstore.role=backend`. The container input parses Docker's wrapper and `decode_json_fields` parses the inner Flask JSON into searchable fields. The output data stream is `petstore-final`.
+`monitoring/filebeat/filebeat.yml` uses Docker autodiscover and accepts only containers with the Compose label `com.petstore.role=backend`. The container input parses Docker's wrapper and `decode_json_fields` parses the inner Flask JSON into searchable fields. Filebeat writes to the regular Elasticsearch index `petstore-final`.
 
 Elasticsearch, Kibana, and Filebeat are pinned to `8.15.3`. Elasticsearch runs single-node with security disabled (local assignment only, no credentials committed). Current resource settings: Elasticsearch has a 512 MiB JVM heap (`-Xms512m -Xmx512m`) and a 1 GiB container memory limit; Kibana has a 1536 MiB Node.js heap (`--max-old-space-size=1536`) and a 2 GiB container memory limit; Filebeat has a 128 MiB limit.
 
@@ -204,45 +260,115 @@ Elasticsearch, Filebeat, and Kibana are all confirmed healthy. The `petstore-fin
 
 ## Part D: System Design
 
-See the accompanying report for the full architecture diagram and the "follow one metric, follow one log" trace through the system (from `app.py` code, through Prometheus/Grafana and Filebeat/Elasticsearch/Kibana respectively, with real values from this project).
+```mermaid
+flowchart LR
+    U[User Browser] -->|HTTP :5173| F[React UI served by nginx]
+    F -->|Proxy API requests| B[Flask REST API :5000]
+    B -->|SQL transactions| DB[(SQLite in petstore_data)]
+    B -->|GET /metrics| P[Prometheus :9090]
+    NE[Node Exporter :9100] -->|Linux environment metrics| P
+    P -->|PromQL datasource| G[Grafana :3000]
+    B -->|Structured JSON container stream| DL[Docker json-file logs]
+    DL -->|Autodiscovery and parsing| FB[Filebeat]
+    FB -->|Indexed documents| ES[(Elasticsearch :9200)]
+    K[Kibana :5601] -->|Discover and queries| ES
+```
+
+React is built into an nginx image. nginx serves the browser application and proxies `/products`, `/orders`, and `/health` to Flask. Flask stores application state in SQLite under the `petstore_data` volume. Prometheus scrapes Flask and Node Exporter every five seconds and persists its TSDB in `prometheus_data`; Grafana reads Prometheus and persists its own state in `grafana_data`. Docker captures backend logs, Filebeat parses them, Elasticsearch persists them in `elasticsearch_data`, and Kibana provides search and inspection.
+
+### Follow one metric: `petstore_orders_total`
+
+`metrics.py` defines this label-free Counter. After a successful `POST /orders` transaction commits, `app.py` calls `petstore_orders_total.inc()`. Flask exposes a value such as `petstore_orders_total 63.0` at `/metrics`. Prometheus scrapes `backend:5000/metrics` under the `petstore-backend` job. Grafana displays the current value with `petstore_orders_total` and rolling activity with `increase(petstore_orders_total[5m])`.
+
+### Follow one log
+
+For a request carrying `X-Request-ID: dataset-order-dog-food-01`, Flask's after-request hook records its normalized route, status, severity, and duration. `JsonLogFormatter` serializes these fields as one JSON line to the container stream. Docker's `json-file` driver wraps and stores the line. Filebeat selects the labeled backend container, removes the Docker wrapper, decodes the inner JSON into top-level fields, and sends the document to `petstore-final`. Elasticsearch adds/indexes `@timestamp`, while Flask's own timestamp remains as `time`. Kibana finds the event with `request_id: "dataset-order-dog-food-01"`.
+
+### Failure behavior
+
+- If Grafana is unavailable, the Pet Store and Prometheus continue; dashboards are temporarily unavailable.
+- If Prometheus is unavailable, the Pet Store continues and `/metrics` remains exposed, but samples missed during the outage cannot be recovered by a later scrape and Grafana cannot query them.
+- If Filebeat is unavailable, the Pet Store continues and Docker retains logs subject to rotation, but Elasticsearch receives no new application events during that period. Complete catch-up after recovery has not been experimentally verified.
+- If Elasticsearch is unavailable, the Pet Store and Docker logging continue, while Filebeat cannot deliver events. Retry duration and complete delivery before Docker rotation have not been experimentally verified.
+- If Kibana is unavailable, ingestion into Elasticsearch can continue, but Discover and search are unavailable.
 
 ## Part E: Experiments
 
 ### E.1 — Reproducible anomaly (slowdown)
 
-A reversible, environment-variable-gated delay is built into `app.py`: when `PETSTORE_INJECT_DELAY=true` (set in `docker-compose.yml`'s backend `environment:` block), every 5th request sleeps ~500ms before being handled, simulating a slow dependency. Default is `"false"` — the app behaves normally unless explicitly toggled.
+A reversible, environment-variable-gated delay is built into `app.py`: when `PETSTORE_INJECT_DELAY=true`, every fifth Flask request sleeps approximately 500 ms. The hook applies to backend requests generally, not only order creation. The timer starts before the delay so the Histogram includes it. Default is `"false"`.
+
+`part-e/anomaly_workload.ps1` sends only `GET /products` requests, prints each status/duration/request ID, and does not create orders or change stock. Because Prometheus also calls the backend, the exact delayed request numbers can shift, but the fault should produce a repeated slow-request pattern.
 
 To run the experiment:
 
-```bash
-# Baseline (delay off): run a load test, note p95/p99 in Grafana.
+1. Confirm `PETSTORE_INJECT_DELAY: "false"` in `docker-compose.yml`. Run the baseline from Windows PowerShell:
 
-# Turn the delay on:
-# edit docker-compose.yml -> PETSTORE_INJECT_DELAY: "true"
-docker compose up -d --build backend
-
-# Re-run the same load test, compare p95/p99 (expect a visible spike).
-
-# Turn it back off:
-# edit docker-compose.yml -> PETSTORE_INJECT_DELAY: "false"
-docker compose up -d --build backend
-
-# Re-run once more to confirm recovery.
+```powershell
+.\part-e\anomaly_workload.ps1 -Scenario baseline -RequestCount 50
 ```
 
-Result: with the delay on, a burst of 50 rapid requests produced a clear p95 spike to ~700ms and p99 to ~950ms-1s against a near-zero baseline. Turning the delay off and re-testing showed individual request times immediately back to 20-100ms, confirming instant recovery at the request level (see the "known issues" note below about why Grafana's own graph lags a few minutes behind that recovery).
+2. Prediction: normal durations should remain low; enabling the fault should add roughly 500 ms to every fifth backend request and increase p95/p99.
+
+3. Change only `PETSTORE_INJECT_DELAY` to `"true"`, then rebuild/recreate only the backend:
+
+```powershell
+docker compose up -d --build backend
+```
+
+4. Run the anomaly workload:
+
+```powershell
+.\part-e\anomaly_workload.ps1 -Scenario anomaly -RequestCount 50
+```
+
+5. Inspect:
+
+```promql
+1000 * histogram_quantile(0.95, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route!="/metrics"}[5m])))
+```
+
+```promql
+1000 * histogram_quantile(0.99, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route!="/metrics"}[5m])))
+```
+
+6. Restore `PETSTORE_INJECT_DELAY` to `"false"` and rebuild/recreate only the backend:
+
+```powershell
+docker compose up -d --build backend
+```
+
+7. Run the same read-only workload for recovery:
+
+```powershell
+.\part-e\anomaly_workload.ps1 -Scenario recovery -RequestCount 50
+```
+
+Previously recorded observation: a 50-request fault run produced a visible p95 around 700 ms and p99 around 950 ms–1 second, followed by direct request durations around 20–100 ms after disabling the fault. Final submission evidence must still record exact commands, timestamps, screenshots, and comparable baseline/anomaly/recovery runs. The five-minute graph takes time to age out even though direct request recovery is immediate.
 
 ### E.2 — Cardinality explosion
 
 A standalone demo, isolated from the main app, lives in `part-e/cardinality_demo.py`. It exposes a counter `demo_requests_total` on its own port (8010), toggled by a `BAD_LABEL` environment variable to either label each increment with a unique `request_id` (bad) or not (good). Prometheus scrapes it via a temporary `cardinality-demo` job in `monitoring/prometheus/prometheus.yml`.
 
-Run it (no local Python install needed — uses a throwaway container):
+Run the BAD case from Windows PowerShell (no local Python installation required):
 
-```bash
+```powershell
 docker run --rm -p 8010:8010 -e BAD_LABEL=true -v "${PWD}\part-e:/app" -w /app python:3.12-slim sh -c "pip install prometheus_client --break-system-packages -q && python -u cardinality_demo.py"
 ```
 
-Then in Prometheus (http://localhost:9090), query `count(demo_requests_total)`: with `BAD_LABEL=true`, this climbs to 100 (one series per unique request_id, over 100 requests). Re-run with `BAD_LABEL` unset/false, and the same query stays flat at 1 series, no matter how many requests are sent.
+Run the GOOD case separately:
+
+```powershell
+docker run --rm -p 8010:8010 -e BAD_LABEL=false -v "${PWD}\part-e:/app" -w /app python:3.12-slim sh -c "pip install prometheus_client --break-system-packages -q && python -u cardinality_demo.py"
+```
+
+In Prometheus query:
+
+```promql
+count(demo_requests_total)
+```
+
+Expected results, not fresh observations: the BAD run approaches 100 series because each UUID creates a distinct `request_id` label value; the GOOD run produces one series. Capture each run with an exact time range. Old BAD series remain historically stored until Prometheus retention removes them, even after they become stale and disappear from an instant query. When the temporary `--rm` container exits, the configured `cardinality-demo` scrape target becomes down/stale because nothing is listening on port 8010.
 
 Conclusion: request-level identifiers create one new Prometheus time series per unique value when used as a label. At real-world scale this is a cardinality explosion that can exhaust Prometheus's memory/storage. Request IDs belong in logs (already searchable via Kibana, see Part C) — never in metric labels.
 

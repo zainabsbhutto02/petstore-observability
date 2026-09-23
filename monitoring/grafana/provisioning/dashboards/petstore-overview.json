@@ -1,254 +1,156 @@
 {
-  "annotations": {
-    "list": [
-      {
-        "builtIn": 1,
-        "datasource": {
-          "type": "grafana",
-          "uid": "-- Grafana --"
-        },
-        "enable": true,
-        "hide": true,
-        "iconColor": "rgba(0, 211, 255, 1)",
-        "name": "Annotations & Alerts",
-        "type": "dashboard"
-      }
-    ]
-  },
-  "description": "Business and application monitoring for the Paws & Cart Pet Store. Monitored environment: DESKTOP-0Q35O43 — WSL2 Ubuntu/Docker environment.",
+  "annotations": {"list": []},
+  "description": "Business and application monitoring for Paws & Cart. User-facing HTTP panels exclude /metrics so Prometheus scrapes do not dominate application traffic.",
   "editable": true,
-  "fiscalYearStartMonth": 0,
-  "graphTooltip": 0,
+  "graphTooltip": 1,
   "id": null,
   "links": [],
   "panels": [
     {
       "collapsed": false,
-      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
       "id": 100,
       "panels": [],
-      "title": "Business / Application KPIs",
+      "title": "Business Overview",
       "type": "row"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "description": "Cumulative number of successfully created orders from petstore_orders_total. This is a Counter total, not a request rate.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "thresholds" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 1 },
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Cumulative successfully created orders. This Counter increases after a successful order transaction.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 1},
       "id": 1,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "expr": "petstore_orders_total",
-          "legendFormat": "successful orders",
-          "refId": "A"
-        }
-      ],
-      "title": "Total successful orders",
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"expr": "petstore_orders_total", "legendFormat": "successful orders", "refId": "A"}],
+      "title": "Total Successful Orders",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "description": "The current number of pending orders in SQLite. This gauge reflects actual business state and is reconstructed from the database after backend restart.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 7, "w": 6, "x": 6, "y": 1 },
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Current pending orders in SQLite. This Gauge is reconstructed from the database when the backend starts.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 10}]}, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 6, "y": 1},
       "id": 2,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "expr": "petstore_pending_orders",
-          "legendFormat": "pending",
-          "refId": "A"
-        }
-      ],
-      "title": "Pending orders",
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"expr": "petstore_pending_orders", "legendFormat": "pending orders", "refId": "A"}],
+      "title": "Pending Orders",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "description": "Average successful order processing duration over the last 5 minutes, derived from the Summary sum/count. This is an average, not a percentile.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 7, "w": 6, "x": 12, "y": 1 },
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Average successful order-processing duration over a rolling five-minute window, calculated from the Summary sum and count.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 250}, {"color": "red", "value": 500}]}, "unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 12, "y": 1},
       "id": 3,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "expr": "1000 * rate(petstore_order_processing_seconds_sum[5m]) / rate(petstore_order_processing_seconds_count[5m])",
-          "legendFormat": "avg processing time",
-          "refId": "A"
-        }
-      ],
-      "title": "Average order processing time (ms)",
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"expr": "1000 * rate(petstore_order_processing_seconds_sum[5m]) / rate(petstore_order_processing_seconds_count[5m])", "legendFormat": "average processing time", "refId": "A"}],
+      "title": "Average Order Processing Time",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "description": "Current HTTP request rate over the last 5 minutes. The normalized route time series below is the self-explored chart.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 1 },
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Application request rate over five minutes, excluding /metrics so Prometheus scraping does not dominate.",
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 18, "y": 1},
       "id": 4,
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "justifyMode": "center",
-        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-        "textMode": "value_and_name"
-      },
-      "targets": [
-        {
-          "expr": "sum(rate(petstore_http_request_duration_seconds_count[5m]))",
-          "legendFormat": "all routes",
-          "refId": "A"
-        }
-      ],
-      "title": "Current request rate (req/s)",
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
+      "targets": [{"expr": "sum(rate(petstore_http_request_duration_seconds_count{route!=\"/metrics\"}[5m]))", "legendFormat": "application requests", "refId": "A"}],
+      "title": "Current Application Request Rate",
       "type": "stat"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "description": "p95 HTTP request duration using a 5-minute rate window. p95 means approximately 95% of observed requests are at or below this latency. This comes from the Histogram, not the Summary.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 7},
+      "id": 101,
+      "panels": [],
+      "title": "Business Activity",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Successful orders created within rolling five-minute windows, derived from the orders Counter.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "bars", "fillOpacity": 35, "lineWidth": 1, "showPoints": "never"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "id": 5,
-      "options": {
-        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "single", "sort": "none" }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(petstore_http_request_duration_seconds_bucket[5m])))",
-          "legendFormat": "p95",
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP request latency p95",
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{"expr": "increase(petstore_orders_total[5m])", "legendFormat": "orders in rolling 5m", "refId": "A"}],
+      "title": "Orders Created Over Time (Rolling 5 Minutes)",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "description": "p99 HTTP request duration using a 5-minute rate window. p99 means approximately 99% of observed requests are at or below this latency. This is calculated from the Histogram, not from the Python Summary.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Historical pending-order Gauge. Increases show creation; decreases show completion.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 15, "lineInterpolation": "stepAfter", "lineWidth": 2, "showPoints": "auto"}, "min": 0, "unit": "short"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "id": 6,
-      "options": {
-        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "single", "sort": "none" }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(petstore_http_request_duration_seconds_bucket[5m])))",
-          "legendFormat": "p99",
-          "refId": "A"
-        }
-      ],
-      "title": "HTTP request latency p99",
+      "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single", "sort": "none"}},
+      "targets": [{"expr": "petstore_pending_orders", "legendFormat": "pending orders", "refId": "A"}],
+      "title": "Pending Orders Over Time",
       "type": "timeseries"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "Prometheus" },
-      "description": "Self-explored metric: request volume by normalized route over the last 5 minutes. This shows traffic distribution without adding request IDs or other high-cardinality labels.",
-      "fieldConfig": {
-        "defaults": {
-          "color": { "mode": "palette-classic" },
-          "mappings": [],
-          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] },
-          "unit": "reqps"
-        },
-        "overrides": []
-      },
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 16},
+      "id": 102,
+      "panels": [],
+      "title": "HTTP Traffic",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Application request rate by normalized Flask route. /metrics is excluded.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never"}, "min": 0, "unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 17},
       "id": 7,
-      "options": {
-        "legend": { "calcs": [], "displayMode": "list", "placement": "bottom" },
-        "tooltip": { "mode": "multi", "sort": "desc" }
-      },
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (route) (rate(petstore_http_request_duration_seconds_count{route!=\"/metrics\"}[5m]))", "legendFormat": "{{route}}", "refId": "A"}],
+      "title": "Request Rate by Normalized Route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "Application request rate grouped by HTTP response status. /metrics is excluded.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 12, "lineWidth": 2, "showPoints": "never"}, "min": 0, "unit": "reqps"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 17},
+      "id": 8,
+      "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (status_code) (rate(petstore_http_request_duration_seconds_count{route!=\"/metrics\"}[5m]))", "legendFormat": "HTTP {{status_code}}", "refId": "A"}],
+      "title": "HTTP Request Rate by Status Code",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 26},
+      "id": 103,
+      "panels": [],
+      "title": "Application Latency",
+      "type": "row"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "Prometheus"},
+      "description": "p95 and p99 application latency from Histogram buckets over five minutes. /metrics is excluded; values are displayed in milliseconds.",
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "custom": {"drawStyle": "line", "fillOpacity": 8, "lineWidth": 2, "showPoints": "never"}, "decimals": 2, "min": 0, "unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 9, "w": 24, "x": 0, "y": 27},
+      "id": 9,
+      "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {
-          "expr": "sum by (route) (rate(petstore_http_request_duration_seconds_count[5m]))",
-          "legendFormat": "{{route}}",
-          "refId": "A"
-        }
+        {"expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route!=\"/metrics\"}[5m])))", "legendFormat": "p95", "refId": "A"},
+        {"expr": "1000 * histogram_quantile(0.99, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route!=\"/metrics\"}[5m])))", "legendFormat": "p99", "refId": "B"}
       ],
-      "title": "Self-explored: request rate by normalized route",
+      "title": "Application Request Latency — p95 and p99",
       "type": "timeseries"
     }
   ],
   "refresh": "5s",
   "schemaVersion": 39,
   "style": "dark",
-  "tags": [ "petstore", "application", "business" ],
-  "templating": { "list": [] },
-  "time": { "from": "now-1h", "to": "now" },
+  "tags": ["petstore", "application", "business", "observability"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
   "timepicker": {},
   "timezone": "browser",
   "title": "Paws & Cart - Application & Business Metrics",
   "uid": "petstore-application-dashboard",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
