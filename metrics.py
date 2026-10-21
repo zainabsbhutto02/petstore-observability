@@ -21,10 +21,18 @@ petstore_http_request_duration_seconds = Histogram(
     "petstore_http_request_duration_seconds",
     "HTTP request latency in seconds.",
     labelnames=("method", "route", "status_code"),
+    # A2: made denser between 10 and 100 ms (observed POST /orders times are about 10-45 ms) so
+    # p50/p95 do not collapse into one wide bucket. The 0.5 s .. 10 s edges used by the A1
+    # delay experiment are unchanged.
     buckets=(
+        0.005,
         0.01,
-        0.025,
+        0.015,
+        0.02,
+        0.03,
+        0.04,
         0.05,
+        0.075,
         0.1,
         0.25,
         0.5,

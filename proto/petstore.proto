@@ -1,0 +1,50 @@
+// Paws & Cart gRPC API (Assignment 2, Part B).
+// Generate Python code with the command in README.md, e.g.:
+//   python -m grpc_tools.protoc -I proto --python_out=grpc_gen --grpc_python_out=grpc_gen proto/petstore.proto
+syntax = "proto3";
+
+package petstore.v1;
+
+service PetStore {
+  // Same data as GET /products.
+  rpc ListProducts(ListProductsRequest) returns (ListProductsResponse);
+
+  // Same rules as POST /orders, including idempotency.
+  //   INVALID_ARGUMENT     bad product_id / quantity / idempotency_key
+  //   NOT_FOUND            unknown product
+  //   FAILED_PRECONDITION  not enough stock
+  //   ALREADY_EXISTS       idempotency_key reused with a different request
+  // A replay of an earlier request carries trailing metadata idempotent-replayed=true.
+  rpc CreateOrder(CreateOrderRequest) returns (Order);
+}
+
+message ListProductsRequest {}
+
+message ListProductsResponse {
+  repeated Product products = 1;
+}
+
+message Product {
+  int32 id = 1;
+  string name = 2;
+  string category = 3;
+  double price = 4;
+  int32 stock = 5;
+}
+
+message CreateOrderRequest {
+  int32 product_id = 1;
+  int32 quantity = 2;
+  string idempotency_key = 3;  // optional, 1-128 characters
+}
+
+message Order {
+  int32 id = 1;
+  int32 product_id = 2;
+  string product_name = 3;
+  int32 quantity = 4;
+  double unit_price = 5;
+  double total_price = 6;
+  string status = 7;
+  string created_at = 8;
+}

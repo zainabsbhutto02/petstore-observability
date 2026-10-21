@@ -378,3 +378,108 @@ Conclusion: request-level identifiers create one new Prometheus time series per 
 - **Elasticsearch memory pressure**: original 256 MiB JVM heap / 512 MiB container limit left Elasticsearch pinned at ~95-97% memory, causing timeouts and a self-restart. Fixed by raising to 512 MiB heap / 1 GiB container limit.
 - **Stray `wslrelay.exe` port conflicts**: after moving the project off WSL onto Windows and switching to Docker Desktop, a leftover `wslrelay.exe` process repeatedly re-bound itself to ports Docker was also trying to use (5601, then later 5000), causing `curl: (56) Recv failure: Connection was reset` even though the container itself was healthy. Diagnosed via `netstat -ano | findstr <port>` + `tasklist /FI "PID eq <pid>"`. A full Windows restart reliably clears it; `wsl --shutdown` alone sometimes leaves Docker Desktop stuck on "Turning off the Docker Engine..." and needs the full restart anyway.
 - **Instrumentation-ordering bug in the delay experiment**: the delay-injection code originally called `time.sleep(0.5)` *before* capturing `request._petstore_start_time`, so the injected delay was invisible to the latency Histogram even though it was genuinely slowing down real requests (confirmed via direct `Measure-Command` timing). Fixed by moving the start-time capture to before the sleep.
+
+
+---
+
+# Assignment 2 - HTTP APIs, gRPC and Metrics
+
+## What was added
+
+| Area | Files |
+|---|---|
+| OpenAPI spec for the REST API | `openapi.yaml` |
+| Idempotency (`Idempotency-Key` on `POST /orders`) | `app.py`, `database.py` (table `idempotency_keys`) |
+| Rate limiting (`429` + `Retry-After` on `POST /orders`) | `app.py` |
+| React caller updated (key per click, one safe retry, friendly 429 message) | `frontend/src/App.jsx` |
+| Python caller (timeout, retry with backoff, circuit breaker) | `client/order_client.py` |
+| gRPC service | `proto/petstore.proto`, `grpc_server.py`, `Dockerfile.grpc`, `requirements-grpc.txt` |
+| gRPC metrics + Prometheus scrape | `grpc_server.py`, `monitoring/prometheus/prometheus.yml` |
+| Grafana gRPC panels (new row "gRPC Service (Part B)") | `monitoring/grafana/provisioning/dashboards/petstore-overview.json` |
+| Tests | `tests/` |
+
+## Run everything
+
+```powershell
+docker compose up -d --build
+```
+
+| Service | URL / port |
+|---|---|
+| Web page (nginx) | http://localhost:5173 |
+| REST API | http://localhost:5000 |
+| gRPC service | `localhost:50051` |
+| gRPC metrics | http://localhost:8001/metrics (scraped by Prometheus job `petstore-grpc`) |
+| Prometheus / Grafana | http://localhost:9090 / http://localhost:3000 |
+
+## Generate the gRPC code (the generation command)
+
+```powershell
+mkdir grpc_gen        # first time only; protoc needs the output folder to exist
+python -m grpc_tools.protoc -I proto --python_out=grpc_gen --grpc_python_out=grpc_gen proto/petstore.proto
+```
+
+`Dockerfile.grpc` runs the same command during the image build, and the tests run it themselves, so the generated files are not committed (`grpc_gen/` is in `.gitignore`). This laptop has no local Python, so use Docker for everything below.
+
+## Tests (REST contract, idempotency, rate limit, client failures, gRPC, metrics)
+
+```powershell
+docker run --rm -v "${PWD}:/app" -w /app python:3.12-slim sh -c "pip install -q -r requirements.txt grpcio==1.84.0 grpcio-tools==1.84.0 pytest pyyaml jsonschema openapi-spec-validator && python -m pytest tests -v"
+```
+
+## Demonstrations
+
+```powershell
+# Python caller: success, retry, timeout retry, breaker open, fail-fast, recovery (no backend needed)
+docker run --rm -v "${PWD}:/app" -w /app python:3.12-slim python client/demo_reliability.py
+
+# Rate limiting against the real REST API (10 x 201, then 429 + Retry-After, then 201)
+docker run --rm --add-host=host.docker.internal:host-gateway -v "${PWD}:/app" -w /app python:3.12-slim python client/demo_rate_limit.py http://host.docker.internal:5000
+
+# gRPC successes and failures with client-side timing (repeat as often as you like)
+docker run --rm --add-host=host.docker.internal:host-gateway -v "${PWD}:/app" -w /app python:3.12-slim sh -c "pip install -q grpcio==1.84.0 grpcio-tools==1.84.0 && mkdir -p grpc_gen && python -m grpc_tools.protoc -I proto --python_out=grpc_gen --grpc_python_out=grpc_gen proto/petstore.proto && python client/grpc_client_demo.py host.docker.internal:50051 10"
+```
+
+## Realistic traffic for the dashboards (and a correctness check)
+
+`client/workload.py` sends customer-like orders (popular products more often, mostly 1 item, ~8% retries
+with the same idempotency key, ~10% mistakes such as quantity 0, unknown product or an absurd quantity).
+The traffic pattern is fixed by `--seed`; idempotency keys include a run ID, so repeating a run creates
+new orders. When it finishes it **reconciles**: stock before - stock after must equal the quantity of
+orders really created, every total must equal unit price x quantity, and it prints `RESULT: PASS` or `FAIL`.
+
+```powershell
+# 1. Restock so traffic is not cut short by earlier experiments (keeps all orders, only resets stock)
+docker compose exec backend python -c "import sqlite3; c=sqlite3.connect('/app/data/petstore.db'); c.execute('UPDATE products SET stock=200'); c.commit(); print(c.execute('SELECT id,name,stock FROM products').fetchall())"
+
+# 2. Run them ONE AFTER THE OTHER (about 6 minutes in total). They share one database, so running them
+#    at the same time would make each reconciliation see the other's orders. Set Grafana to "Last 15 minutes".
+docker run --rm --add-host=host.docker.internal:host-gateway -v "${PWD}:/app" -w /app python:3.12-slim sh -c "pip install -q grpcio==1.84.0 grpcio-tools==1.84.0 && mkdir -p grpc_gen && python -m grpc_tools.protoc -I proto --python_out=grpc_gen --grpc_python_out=grpc_gen proto/petstore.proto && python client/workload.py grpc host.docker.internal:50051 --count 150 --per-minute 60"
+docker run --rm --add-host=host.docker.internal:host-gateway -v "${PWD}:/app" -w /app python:3.12-slim python client/workload.py http host.docker.internal:5000 --count 30 --per-minute 9
+```
+
+### Make the in-flight panel show something
+
+Run the burst (about 30 seconds, at most 10 real orders) while Grafana is open. With one call at a time the
+gauge is always 0 when Prometheus samples it; with 16 threads the calls overlap and the panel rises above zero.
+
+```powershell
+docker run --rm --add-host=host.docker.internal:host-gateway -v "${PWD}:/app" -w /app python:3.12-slim sh -c "pip install -q grpcio==1.84.0 grpcio-tools==1.84.0 && mkdir -p grpc_gen && python -m grpc_tools.protoc -I proto --python_out=grpc_gen --grpc_python_out=grpc_gen proto/petstore.proto && python client/grpc_burst.py host.docker.internal:50051 16 30"
+```
+
+The HTTP run uses 9 requests per minute because `POST /orders` allows 10 per minute per client IP. Add
+`--per-minute 30` to the HTTP command to also see `429` responses in the dashboard.
+
+## Useful Prometheus queries (gRPC)
+
+```promql
+sum by (grpc_method, grpc_code) (rate(grpc_server_handled_total[5m]))
+100 * sum by (grpc_method) (rate(grpc_server_handled_total{grpc_code!="OK"}[5m])) / sum by (grpc_method) (rate(grpc_server_handled_total[5m]))
+histogram_quantile(0.95, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket[5m])))
+sum by (grpc_method) (grpc_server_in_flight_requests)
+sum by (reason) (increase(petstore_grpc_orders_rejected_total[5m]))
+```
+
+## Sources and reuse
+
+The interceptor-based metrics pattern follows the usual Prometheus gRPC conventions (`grpc_server_handled_total`, `grpc_server_handling_seconds`); the code here was written for this project. Add the gRPC workshop reference you reused to the report.

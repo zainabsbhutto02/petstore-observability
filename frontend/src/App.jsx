@@ -9,10 +9,27 @@ async function readResponse(response) {
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (response.status === 429) {
+      // Rate limited: tell the user exactly when they may try again.
+      const seconds = response.headers.get("Retry-After") || data.retry_after_seconds;
+      throw new Error(
+        `Too many orders too quickly. Please try again in ${seconds || "a few"} seconds.`
+      );
+    }
     throw new Error(data.error || "The request could not be completed.");
   }
 
   return data;
+}
+
+
+// One new key per click on "Buy". If the network drops and we retry, the retry
+// reuses the same key, so the server returns the same order instead of making a second one.
+function newIdempotencyKey() {
+  if (window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 
@@ -68,12 +85,25 @@ function App() {
     setActiveProductId(productId);
     setMessage(null);
 
-    try {
-      const response = await fetch("/orders", {
+    const idempotencyKey = newIdempotencyKey();
+    const request = () =>
+      fetch("/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idempotencyKey
+        },
         body: JSON.stringify({ product_id: productId, quantity })
       });
+
+    try {
+      let response;
+      try {
+        response = await request();
+      } catch {
+        // Network failure (no response at all): safe to retry once because of the key.
+        response = await request();
+      }
       const order = await readResponse(response);
 
       await Promise.all([loadProducts(), loadOrders()]);

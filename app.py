@@ -1,11 +1,15 @@
 """A small, beginner-friendly backend for the Online Pet Store."""
 
+import hashlib
 import json
 import logging
 import os
+import math
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from collections import defaultdict, deque
 from itertools import count as _count
 
 from flask import Flask, g, jsonify, request
@@ -116,6 +120,10 @@ def health():
 @app.get("/metrics")
 def metrics():
     """Expose the application metrics in Prometheus text format."""
+    # Orders can also be created or changed by the gRPC service (a different process),
+    # so re-read the pending count from SQLite on every scrape instead of trusting
+    # the value this process last set.
+    update_pending_orders_gauge()
     return generate_latest(), 200, {"Content-Type": CONTENT_TYPE_LATEST}
 
 
@@ -132,9 +140,58 @@ def get_products():
         connection.close()
 
 
+# --- A2 rate limiting: POST /orders only -----------------------------------
+# Sliding window, kept in memory. Limit: RATE_LIMIT_MAX requests per
+# RATE_LIMIT_WINDOW_SECONDS for each client IP (nginx passes the caller's
+# address in X-Real-IP, so everyone behind the same IP shares one budget).
+# The state lives in this one process; it resets on restart, and with several
+# backend workers each would need its own (or a shared store such as Redis).
+RATE_LIMIT_MAX = int(os.environ.get("RATE_LIMIT_MAX", "10"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "60"))
+_rate_hits = defaultdict(deque)
+_rate_lock = threading.Lock()
+
+
+def client_ip():
+    return request.headers.get("X-Real-IP") or request.remote_addr or "unknown"
+
+
+def check_rate_limit(ip, now=None):
+    """Return 0 if the request is allowed, else seconds until it may retry."""
+    now = time.monotonic() if now is None else now
+    with _rate_lock:
+        hits = _rate_hits[ip]
+        while hits and now - hits[0] >= RATE_LIMIT_WINDOW_SECONDS:
+            hits.popleft()
+        if len(hits) >= RATE_LIMIT_MAX:
+            return max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - hits[0])))
+        hits.append(now)
+        return 0
+
+
+ORDER_SELECT = """
+    SELECT orders.*, products.name AS product_name
+    FROM orders
+    JOIN products ON products.id = orders.product_id
+"""
+
+
 @app.post("/orders")
 def create_order():
     """Create a pending order and reduce the selected product's stock."""
+    retry_after = check_rate_limit(client_ip())
+    if retry_after:
+        response = jsonify(
+            {
+                "error": "Too many requests.",
+                "limit": RATE_LIMIT_MAX,
+                "window_seconds": RATE_LIMIT_WINDOW_SECONDS,
+                "retry_after_seconds": retry_after,
+            }
+        )
+        response.headers["Retry-After"] = str(retry_after)
+        return response, 429
+
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be valid JSON."}), 400
@@ -149,12 +206,40 @@ def create_order():
     if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity <= 0:
         return jsonify({"error": "quantity must be a positive integer."}), 400
 
+    idempotency_key = request.headers.get("Idempotency-Key")
+    if idempotency_key is not None and not (1 <= len(idempotency_key) <= 128):
+        return jsonify({"error": "Idempotency-Key must be 1 to 128 characters."}), 400
+    request_hash = hashlib.sha256(
+        json.dumps({"product_id": product_id, "quantity": quantity}, sort_keys=True).encode()
+    ).hexdigest()
+
     connection = get_connection()
     start_time = time.perf_counter()
     try:
         # BEGIN IMMEDIATE prevents another order from changing stock until this
-        # transaction has either committed or rolled back.
+        # transaction has either committed or rolled back. The idempotency check
+        # below runs inside it, so two simultaneous retries cannot both create an order.
         connection.execute("BEGIN IMMEDIATE")
+
+        if idempotency_key is not None:
+            saved = connection.execute(
+                "SELECT request_hash, order_id FROM idempotency_keys WHERE key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            if saved is not None:
+                if saved["request_hash"] != request_hash:
+                    connection.rollback()
+                    return jsonify(
+                        {"error": "Idempotency-Key was already used with a different request."}
+                    ), 422
+                replayed = connection.execute(
+                    ORDER_SELECT + " WHERE orders.id = ?", (saved["order_id"],)
+                ).fetchone()
+                connection.rollback()
+                response = jsonify(dict(replayed))
+                response.headers["Idempotent-Replayed"] = "true"
+                return response, 201
+
         product = connection.execute(
             "SELECT id, name, price, stock FROM products WHERE id = ?",
             (product_id,),
@@ -186,16 +271,15 @@ def create_order():
             "UPDATE products SET stock = stock - ? WHERE id = ?",
             (quantity, product_id),
         )
+        if idempotency_key is not None:
+            connection.execute(
+                "INSERT INTO idempotency_keys (key, request_hash, order_id) VALUES (?, ?, ?)",
+                (idempotency_key, request_hash, cursor.lastrowid),
+            )
         connection.commit()
 
         order = connection.execute(
-            """
-            SELECT orders.*, products.name AS product_name
-            FROM orders
-            JOIN products ON products.id = orders.product_id
-            WHERE orders.id = ?
-            """,
-            (cursor.lastrowid,),
+            ORDER_SELECT + " WHERE orders.id = ?", (cursor.lastrowid,)
         ).fetchone()
         petstore_orders_total.inc()
         update_pending_orders_gauge()

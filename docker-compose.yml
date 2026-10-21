@@ -20,6 +20,27 @@ services:
       - petstore-net
     restart: unless-stopped
 
+  grpc-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.grpc
+    depends_on:
+      - backend
+    ports:
+      - "50051:50051"
+    labels:
+      com.petstore.role: grpc
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    volumes:
+      - petstore_data:/app/data
+    networks:
+      - petstore-net
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

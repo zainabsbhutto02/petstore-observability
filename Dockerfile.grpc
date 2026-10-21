@@ -1,0 +1,20 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+COPY requirements-grpc.txt .
+RUN pip install --no-cache-dir -r requirements-grpc.txt
+
+COPY database.py grpc_server.py ./
+COPY proto ./proto
+
+# The generation command: .proto -> Python code (petstore_pb2.py, petstore_pb2_grpc.py)
+RUN mkdir -p grpc_gen data \
+ && python -m grpc_tools.protoc -I proto --python_out=grpc_gen --grpc_python_out=grpc_gen proto/petstore.proto
+
+EXPOSE 50051 8001
+
+CMD ["python", "grpc_server.py"]

@@ -54,6 +54,17 @@ def initialize_database():
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (product_id) REFERENCES products (id)
             );
+
+            -- A2: remembers the result of each POST /orders that carried an
+            -- Idempotency-Key, so a retry returns the same order instead of
+            -- creating a second one.
+            CREATE TABLE IF NOT EXISTS idempotency_keys (
+                key TEXT PRIMARY KEY,
+                request_hash TEXT NOT NULL,
+                order_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (order_id) REFERENCES orders (id)
+            );
             """
         )
 

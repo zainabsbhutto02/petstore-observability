@@ -21,7 +21,7 @@
       "gridPos": {"h": 6, "w": 6, "x": 0, "y": 1},
       "id": 1,
       "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
-      "targets": [{"expr": "petstore_orders_total", "legendFormat": "successful orders", "refId": "A"}],
+      "targets": [{"expr": "sum(petstore_orders_total) + (sum(petstore_grpc_orders_created_total) or vector(0))", "legendFormat": "successful orders", "refId": "A"}],
       "title": "Total Successful Orders",
       "type": "stat"
     },
@@ -73,7 +73,7 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
       "id": 5,
       "options": {"legend": {"calcs": ["lastNotNull"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "increase(petstore_orders_total[5m])", "legendFormat": "orders in rolling 5m", "refId": "A"}],
+      "targets": [{"expr": "sum(increase(petstore_orders_total[5m])) + (sum(increase(petstore_grpc_orders_created_total[5m])) or vector(0))", "legendFormat": "orders in rolling 5m", "refId": "A"}],
       "title": "Orders Created Over Time (Rolling 5 Minutes)",
       "type": "timeseries"
     },
@@ -139,6 +139,461 @@
       ],
       "title": "Application Request Latency — p95 and p99",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "id": 104,
+      "panels": [],
+      "title": "Create an Order: HTTP (POST /orders) vs gRPC (CreateOrder)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Completed gRPC calls per second by RPC method and gRPC status code (5 minute rate).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 37
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (grpc_method, grpc_code) (rate(grpc_server_handled_total[5m]))",
+          "legendFormat": "{{grpc_method}} {{grpc_code}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gRPC - Calls by Method and Status Code",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Same operation over HTTP: POST /orders per second by status code (5 minute rate). 429 = rate limited.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 37
+      },
+      "id": 15,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (status_code) (rate(petstore_http_request_duration_seconds_count{route=\"/orders\",method=\"POST\"}[5m]))",
+          "legendFormat": "{{status_code}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP - POST /orders Calls by Status Code",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Share of calls per method that ended with any status other than OK (5 minute window).",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 46
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * sum by (grpc_method) (rate(grpc_server_handled_total{grpc_code!=\"OK\"}[5m])) / sum by (grpc_method) (rate(grpc_server_handled_total[5m]))",
+          "legendFormat": "{{grpc_method}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gRPC - Error Rate by Method",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Share of POST /orders calls with a 4xx/5xx status (5 minute window). Includes 429 rate-limit rejections.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 46
+      },
+      "id": 16,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * sum(rate(petstore_http_request_duration_seconds_count{route=\"/orders\",method=\"POST\",status_code!~\"2..\"}[5m])) / sum(rate(petstore_http_request_duration_seconds_count{route=\"/orders\",method=\"POST\"}[5m]))",
+          "legendFormat": "POST /orders",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP - POST /orders Error Rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Server-side handling time from grpc_server_handling_seconds, 5 minute window, in milliseconds. Excludes network and client time.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 55
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "1000 * histogram_quantile(0.50, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket[5m])))",
+          "legendFormat": "p50 {{grpc_method}}",
+          "refId": "A"
+        },
+        {
+          "expr": "1000 * histogram_quantile(0.95, sum by (le, grpc_method) (rate(grpc_server_handling_seconds_bucket[5m])))",
+          "legendFormat": "p95 {{grpc_method}}",
+          "refId": "B"
+        }
+      ],
+      "title": "gRPC - Server Latency p50 and p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Server-side time from the HTTP histogram for POST /orders, 5 minute window, in milliseconds.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 55
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "1000 * histogram_quantile(0.50, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route=\"/orders\",method=\"POST\"}[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "1000 * histogram_quantile(0.95, sum by (le) (rate(petstore_http_request_duration_seconds_bucket{route=\"/orders\",method=\"POST\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "title": "HTTP - POST /orders Latency p50 and p95",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "Calls being handled right now (gauge). Orders are written one at a time (BEGIN IMMEDIATE), so a rising value means calls are queueing.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 0,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (grpc_method) (grpc_server_in_flight_requests)",
+          "legendFormat": "{{grpc_method}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gRPC - In-Flight Calls by Method",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "Prometheus"
+      },
+      "description": "CreateOrder calls rejected, by bounded reason: invalid_argument, product_not_found, insufficient_stock, key_conflict.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 8,
+            "lineWidth": 2,
+            "showPoints": "never"
+          },
+          "decimals": 2,
+          "min": 0,
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "id": 14,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (reason) (increase(petstore_grpc_orders_rejected_total[5m]))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "title": "gRPC - Orders Rejected by Reason (Rolling 5 Minutes)",
+      "type": "timeseries"
     }
   ],
   "refresh": "5s",
@@ -151,6 +606,6 @@
   "timezone": "browser",
   "title": "Paws & Cart - Application & Business Metrics",
   "uid": "petstore-application-dashboard",
-  "version": 2,
+  "version": 3,
   "weekStart": ""
 }
