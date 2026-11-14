@@ -1,0 +1,36 @@
+{
+  "run_id": "d3-failure-http-http-9cf00c",
+  "label": "d3-failure-http",
+  "interface": "http",
+  "operation": "GET /products",
+  "target": "envoy:5000",
+  "target_rate_per_s": 20.0,
+  "duration_s": 90.0,
+  "achieved_send_rate_per_s": 20.0,
+  "sent": 1800,
+  "successes": 1776,
+  "failures": 24,
+  "error_rate_percent": 1.33,
+  "failures_by_reason": {
+    "http_503": 24
+  },
+  "client_latency_ms": {
+    "p50": 7.43,
+    "p95": 13.73,
+    "p99": 116.22,
+    "max": 409.2
+  },
+  "replica_counts": {
+    "A": 722,
+    "B": 335,
+    "C": 719
+  },
+  "replica_share_percent": {
+    "A": 40.7,
+    "B": 18.9,
+    "C": 40.5
+  },
+  "late_sends": 8,
+  "started_utc": "2026-11-08T14:51:01+00:00",
+  "ended_utc": "2026-11-08T14:52:31+00:00"
+}

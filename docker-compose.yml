@@ -1,52 +1,88 @@
+# Fixed project name, so the replica containers are always petstore-observability-app-1/2/3
+# (Envoy and Prometheus address them by these names).
+name: petstore-observability
+
 services:
-  backend:
+  # Assignment 3: three identical replicas (A, B, C) of the application. Each one serves the
+  # REST API on :5000 and the gRPC service on :50051 (run_replica.py). No host ports: clients go
+  # through Envoy, and Prometheus scrapes each replica directly on the Docker network.
+  app:
     build:
       context: .
-      dockerfile: Dockerfile
-    ports:
-      - "5000:5000"
+      dockerfile: Dockerfile.app
+    deploy:
+      replicas: 3
     environment:
       PETSTORE_INJECT_DELAY: "false"
+      REPLICA_NAME_PREFIX: petstore-observability-app   # replica_identity.py: app-1 -> A, ...
+      # A3 Part D fault: slow down ONE replica (empty = off). Example:
+      #   $env:PETSTORE_DELAY_REPLICA = "B"; $env:PETSTORE_DELAY_MS = "200"; docker compose up -d app
+      #   Remove-Item Env:PETSTORE_DELAY_*; docker compose up -d app        # restore
+      PETSTORE_DELAY_REPLICA: ${PETSTORE_DELAY_REPLICA:-}
+      PETSTORE_DELAY_MS: ${PETSTORE_DELAY_MS:-0}
+    expose:
+      - "5000"
+      - "50051"
     labels:
-      com.petstore.role: backend
+      com.petstore.role: app
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: "3"
     volumes:
-      - petstore_data:/app/data
+      - petstore_data:/app/data     # one SQLite file shared by all replicas
     networks:
       - petstore-net
     restart: unless-stopped
 
-  grpc-service:
-    build:
-      context: .
-      dockerfile: Dockerfile.grpc
+  envoy:
+    image: envoyproxy/envoy:v1.31.2
+    # envoy/envoy.yaml = Part C equal round robin (default). To run another config from envoy/:
+    #   $env:ENVOY_CONFIG = "part-a-a-only.yaml"; docker compose up -d envoy
+    #   Remove-Item Env:ENVOY_CONFIG; docker compose up -d envoy      # restore round robin
+    command: ["envoy", "-c", "/etc/envoy/configs/${ENVOY_CONFIG:-envoy.yaml}"]
     depends_on:
-      - backend
+      - app
     ports:
-      - "50051:50051"
+      - "5000:5000"     # HTTP  (same host port as the A2 REST API)
+      - "50051:50051"   # gRPC  (same host port as the A2 gRPC service)
+      - "9901:9901"     # admin: /stats/prometheus, /clusters
+    volumes:
+      - ./envoy:/etc/envoy/configs:ro
     labels:
-      com.petstore.role: grpc
+      com.petstore.role: envoy
     logging:
       driver: json-file
       options:
         max-size: 10m
         max-file: "3"
-    volumes:
-      - petstore_data:/app/data
     networks:
       - petstore-net
     restart: unless-stopped
+
+  # A3 fixed-rate test client (client/loadgen.py). Not started by "up" (profile "tools");
+  # run it on demand, inside the Docker network, against Envoy (the balanced route):
+  #   docker compose run --rm loadgen http --rate 20 --duration 60 --label baseline
+  # Uses the replica image because it already has grpcio and the generated gRPC code.
+  loadgen:
+    build:
+      context: .
+      dockerfile: Dockerfile.app
+    profiles: ["tools"]
+    entrypoint: ["python", "client/loadgen.py"]
+    volumes:
+      - ./client:/app/client:ro
+      - ./results:/app/results      # one JSON summary per run
+    networks:
+      - petstore-net
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     depends_on:
-      - backend
+      - envoy
     ports:
       - "5173:80"
     networks:
@@ -144,6 +180,7 @@ services:
       - ./monitoring/filebeat/petstore-template.json:/usr/share/filebeat/petstore-template.json:ro
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+      - filebeat_data:/usr/share/filebeat/data   # A3: keep the registry (read positions) across recreates
     networks:
       - petstore-net
     mem_limit: 128m
@@ -154,6 +191,7 @@ volumes:
   prometheus_data:
   grafana_data:
   elasticsearch_data:
+  filebeat_data:
 
 networks:
   petstore-net:

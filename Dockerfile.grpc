@@ -8,7 +8,7 @@ ENV PYTHONUNBUFFERED=1
 COPY requirements-grpc.txt .
 RUN pip install --no-cache-dir -r requirements-grpc.txt
 
-COPY database.py grpc_server.py ./
+COPY database.py grpc_server.py replica_identity.py ./
 COPY proto ./proto
 
 # The generation command: .proto -> Python code (petstore_pb2.py, petstore_pb2_grpc.py)

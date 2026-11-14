@@ -1,0 +1,117 @@
+{
+  "run_id": "d3-failure-http-http-9cf00c",
+  "interface": "http",
+  "cluster": "http_replicas",
+  "health_check": "interval 2s, timeout 1s, unhealthy_threshold 2, healthy_threshold 2",
+  "workload_started_utc": "2026-11-08T14:51:01.0960006+00:00",
+  "stop_at_s": 20,
+  "start_at_s": 50,
+  "events": [
+    {
+      "t_s": 0.1,
+      "utc": "14:51:01.202",
+      "event": "Envoy http_replicas : B is healthy"
+    },
+    {
+      "t_s": 0.12,
+      "utc": "14:51:01.215",
+      "event": "Envoy grpc_replicas : B is healthy"
+    },
+    {
+      "t_s": 20.06,
+      "utc": "14:51:21.157",
+      "event": "docker stop petstore-observability-app-2 (issued)"
+    },
+    {
+      "t_s": 23.58,
+      "utc": "14:51:24.676",
+      "event": "docker stop returned (B is down)"
+    },
+    {
+      "t_s": 24.23,
+      "utc": "14:51:25.326",
+      "event": "Envoy http_replicas : B is unhealthy (failed_active_health_check,active_hc_timeout)"
+    },
+    {
+      "t_s": 24.23,
+      "utc": "14:51:25.327",
+      "event": "Envoy grpc_replicas : B is unhealthy (failed_active_health_check,active_hc_timeout)"
+    },
+    {
+      "t_s": 27.57,
+      "utc": "14:51:28.667",
+      "event": "Envoy http_replicas : B is absent"
+    },
+    {
+      "t_s": 27.57,
+      "utc": "14:51:28.669",
+      "event": "Envoy grpc_replicas : B is absent"
+    },
+    {
+      "t_s": 50.09,
+      "utc": "14:51:51.184",
+      "event": "docker start petstore-observability-app-2 (issued)"
+    },
+    {
+      "t_s": 52.07,
+      "utc": "14:51:53.164",
+      "event": "docker start returned (B process starting)"
+    },
+    {
+      "t_s": 52.71,
+      "utc": "14:51:53.805",
+      "event": "Envoy http_replicas : B is unhealthy (failed_active_health_check)"
+    },
+    {
+      "t_s": 52.71,
+      "utc": "14:51:53.807",
+      "event": "Envoy grpc_replicas : B is unhealthy (failed_active_health_check)"
+    },
+    {
+      "t_s": 60.95,
+      "utc": "14:52:02.047",
+      "event": "Envoy http_replicas : B is healthy"
+    },
+    {
+      "t_s": 60.97,
+      "utc": "14:52:02.061",
+      "event": "Envoy grpc_replicas : B is healthy"
+    }
+  ],
+  "client_summary": {
+    "run_id": "d3-failure-http-http-9cf00c",
+    "label": "d3-failure-http",
+    "interface": "http",
+    "operation": "GET /products",
+    "target": "envoy:5000",
+    "target_rate_per_s": 20.0,
+    "duration_s": 90.0,
+    "achieved_send_rate_per_s": 20.0,
+    "sent": 1800,
+    "successes": 1776,
+    "failures": 24,
+    "error_rate_percent": 1.33,
+    "failures_by_reason": {
+      "http_503": 24
+    },
+    "client_latency_ms": {
+      "p50": 7.43,
+      "p95": 13.73,
+      "p99": 116.22,
+      "max": 409.2
+    },
+    "replica_counts": {
+      "A": 722,
+      "B": 335,
+      "C": 719
+    },
+    "replica_share_percent": {
+      "A": 40.7,
+      "B": 18.9,
+      "C": 40.5
+    },
+    "late_sends": 8,
+    "started_utc": "2026-11-08T19:51:01+05:00",
+    "ended_utc": "2026-11-08T19:52:31+05:00"
+  }
+}

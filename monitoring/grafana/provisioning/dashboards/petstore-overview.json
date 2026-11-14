@@ -32,7 +32,7 @@
       "gridPos": {"h": 6, "w": 6, "x": 6, "y": 1},
       "id": 2,
       "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
-      "targets": [{"expr": "petstore_pending_orders", "legendFormat": "pending orders", "refId": "A"}],
+      "targets": [{"expr": "max(petstore_pending_orders)", "legendFormat": "pending orders", "refId": "A"}],
       "title": "Pending Orders",
       "type": "stat"
     },
@@ -43,7 +43,7 @@
       "gridPos": {"h": 6, "w": 6, "x": 12, "y": 1},
       "id": 3,
       "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "center", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value_and_name"},
-      "targets": [{"expr": "1000 * rate(petstore_order_processing_seconds_sum[5m]) / rate(petstore_order_processing_seconds_count[5m])", "legendFormat": "average processing time", "refId": "A"}],
+      "targets": [{"expr": "1000 * sum(rate(petstore_order_processing_seconds_sum[5m])) / sum(rate(petstore_order_processing_seconds_count[5m]))", "legendFormat": "average processing time", "refId": "A"}],
       "title": "Average Order Processing Time",
       "type": "stat"
     },
@@ -84,7 +84,7 @@
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
       "id": 6,
       "options": {"legend": {"calcs": ["lastNotNull", "max"], "displayMode": "table", "placement": "bottom"}, "tooltip": {"mode": "single", "sort": "none"}},
-      "targets": [{"expr": "petstore_pending_orders", "legendFormat": "pending orders", "refId": "A"}],
+      "targets": [{"expr": "max(petstore_pending_orders)", "legendFormat": "pending orders", "refId": "A"}],
       "title": "Pending Orders Over Time",
       "type": "timeseries"
     },

@@ -1,0 +1,31 @@
+{
+  "run_id": "baseline-A-only-grpc-5e9336",
+  "label": "baseline-A-only",
+  "interface": "grpc",
+  "operation": "PetStore.ListProducts",
+  "target": "envoy:50051",
+  "target_rate_per_s": 20.0,
+  "duration_s": 90.0,
+  "achieved_send_rate_per_s": 20.0,
+  "sent": 1800,
+  "successes": 1800,
+  "failures": 0,
+  "unfinished": 0,
+  "error_rate_percent": 0.0,
+  "failures_by_reason": {},
+  "client_latency_ms": {
+    "p50": 5.12,
+    "p95": 10.04,
+    "p99": 30.34,
+    "max": 200.77
+  },
+  "replica_counts": {
+    "A": 1800
+  },
+  "replica_share_percent": {
+    "A": 100.0
+  },
+  "late_sends": 0,
+  "started_utc": "2026-11-08T13:54:30+00:00",
+  "ended_utc": "2026-11-08T13:56:00+00:00"
+}

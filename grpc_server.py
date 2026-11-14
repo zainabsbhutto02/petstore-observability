@@ -17,7 +17,9 @@ import logging
 import os
 import sys
 import time
+import uuid
 from concurrent import futures
+from datetime import datetime, timezone
 
 import grpc
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
@@ -27,6 +29,16 @@ import petstore_pb2 as pb              # noqa: E402  (generated from proto/petst
 import petstore_pb2_grpc as pb_grpc    # noqa: E402
 
 from database import get_connection, initialize_database  # noqa: E402
+from replica_identity import INJECTED_DELAY_SECONDS, REPLICA_ID  # noqa: E402  (A3: A/B/C)
+
+try:   # A3 Part D: standard gRPC health service (grpc.health.v1) for Envoy's active health checks
+    from grpc_health.v1 import health as grpc_health_impl
+    from grpc_health.v1 import health_pb2 as grpc_health_pb2
+    from grpc_health.v1 import health_pb2_grpc as grpc_health_pb2_grpc
+except ImportError:      # optional, so the A2 test command (grpcio + grpcio-tools only) still works
+    grpc_health_impl = None
+
+HEALTH_PREFIX = "/grpc.health.v1.Health/"
 
 SERVICE = "petstore.v1.PetStore"
 KNOWN_METHODS = {"ListProducts", "CreateOrder"}   # anything else is labelled "unknown"
@@ -78,6 +90,8 @@ class MetricsInterceptor(grpc.ServerInterceptor):
         handler = continuation(handler_call_details)
         if handler is None or handler.unary_unary is None:
             return handler
+        if handler_call_details.method.startswith(HEALTH_PREFIX):
+            return handler   # health checks: no metrics, no log line, never delayed
         method = method_label(handler_call_details.method)
         inner = handler.unary_unary
 
@@ -86,7 +100,15 @@ class MetricsInterceptor(grpc.ServerInterceptor):
             gauge.inc()
             started = time.perf_counter()
             code = grpc.StatusCode.OK
+            # A3: Envoy forwards (or creates) x-request-id as gRPC metadata. Log it with the
+            # replica letter so one Kibana search finds both the Envoy and the replica event,
+            # and send the replica back in the initial metadata for Envoy's access log.
+            metadata = dict(context.invocation_metadata() or ())
+            request_id = metadata.get("x-request-id") or str(uuid.uuid4())
+            context.send_initial_metadata((("x-replica", REPLICA_ID), ("x-request-id", request_id)))
             try:
+                if INJECTED_DELAY_SECONDS:      # A3 Part D: only on the replica chosen as slow
+                    time.sleep(INJECTED_DELAY_SECONDS)
                 return inner(request, context)
             except Exception:
                 code = context.code() or grpc.StatusCode.UNKNOWN   # set by context.abort()
@@ -96,8 +118,13 @@ class MetricsInterceptor(grpc.ServerInterceptor):
                 gauge.dec()
                 handled_total.labels(SERVICE, method, code.name).inc()
                 handling_seconds.labels(SERVICE, method, code.name).observe(elapsed)
-                log.info(json.dumps({"service": "pet-store-grpc", "grpc_method": method,
-                                     "grpc_code": code.name, "duration_ms": round(elapsed * 1000, 3)}))
+                log.info(json.dumps({"time": datetime.now(timezone.utc).isoformat(),
+                                     "service": "pet-store-grpc", "replica": REPLICA_ID,
+                                     "severity": "INFO" if code == grpc.StatusCode.OK else "WARNING",
+                                     "message": "gRPC call completed", "request_id": request_id,
+                                     "grpc_method": method, "grpc_code": code.name,
+                                     "duration_ms": round(elapsed * 1000, 3)},
+                                    separators=(",", ":")))
 
         return grpc.unary_unary_rpc_method_handler(
             wrapped,
@@ -195,7 +222,22 @@ def build_server(port=50051, max_workers=10):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers),
                          interceptors=[MetricsInterceptor()])
     pb_grpc.add_PetStoreServicer_to_server(PetStoreServicer(), server)
+    global health_servicer
+    if grpc_health_impl is not None:
+        health_servicer = grpc_health_impl.HealthServicer()
+        grpc_health_pb2_grpc.add_HealthServicer_to_server(health_servicer, server)
+        for name in ("", SERVICE):       # "" = the server as a whole (what Envoy asks about)
+            health_servicer.set(name, grpc_health_pb2.HealthCheckResponse.SERVING)
     return server, server.add_insecure_port(f"[::]:{port}")
+
+
+health_servicer = None   # set by build_server when grpcio-health-checking is installed
+
+
+def mark_not_serving():
+    """Tell health checkers this replica is going away (used on SIGTERM)."""
+    if health_servicer is not None:
+        health_servicer.enter_graceful_shutdown()
 
 
 def main():

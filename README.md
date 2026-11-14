@@ -2,6 +2,11 @@
 
 A small online pet store project built with a Flask API, SQLite persistence, and a React + Vite frontend, instrumented end-to-end with Prometheus, Grafana, and the Elastic Stack (Filebeat, Elasticsearch, Kibana).
 
+> **Assignment 3 (current state of the code):** the REST API and the gRPC service now run together as
+> three replicas (A, B, C) behind an **Envoy** proxy on ports 5000 (HTTP) and 50051 (gRPC). The
+> `backend` and `grpc-service` containers mentioned in the Assignment 1 and 2 sections below were
+> replaced by the scaled `app` service. See [Assignment 3](#assignment-3---load-balancing-and-observability-with-envoy).
+
 ## Part A: Problem, users, and solution
 
 Small pet shops need a simple way to present products, track stock, accept orders, and complete them without the complexity of a full e-commerce platform. Paws & Cart is intended for a shop operator demonstrating these everyday workflows and for students learning how application behavior becomes observable.
@@ -412,6 +417,11 @@ docker compose up -d --build
 | gRPC metrics | http://localhost:8001/metrics (scraped by Prometheus job `petstore-grpc`) |
 | Prometheus / Grafana | http://localhost:9090 / http://localhost:3000 |
 
+> Since Assignment 3, `localhost:5000` and `localhost:50051` are **Envoy**, which forwards to the replicas
+> (the commands below still work unchanged). gRPC metrics are no longer on a separate port 8001: each
+> replica shows its HTTP and gRPC metrics together on its own `/metrics`, scraped by the job
+> `petstore-app`. In the restock command below, use `docker compose exec app` instead of `backend`.
+
 ## Generate the gRPC code (the generation command)
 
 ```powershell
@@ -483,3 +493,268 @@ sum by (reason) (increase(petstore_grpc_orders_rejected_total[5m]))
 ## Sources and reuse
 
 The interceptor-based metrics pattern follows the usual Prometheus gRPC conventions (`grpc_server_handled_total`, `grpc_server_handling_seconds`); the code here was written for this project. Add the gRPC workshop reference you reused to the report.
+
+---
+
+# Assignment 3 - Load Balancing and Observability with Envoy
+
+Envoy distributes HTTP requests and gRPC calls across three replicas (A, B, C) of the application, and
+the A1/A2 observability stack (Prometheus, Grafana, Filebeat, Elasticsearch, Kibana) is used to show and
+explain where every request went and how each balancing policy behaves.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    LG["loadgen (fixed-rate client)"] -->|HTTP :5000 / gRPC :50051| E
+    U[Browser :5173] --> N[nginx + React] -->|HTTP/1.1| E
+    E["Envoy<br/>HTTP listener :5000<br/>gRPC listener :50051 (HTTP/2, routed per call)<br/>admin :9901"]
+    E --> A["Replica A (app-1)<br/>HTTP :5000 + gRPC :50051"]
+    E --> B["Replica B (app-2)"]
+    E --> C["Replica C (app-3)"]
+    A & B & C --> DB[("SQLite on the shared<br/>petstore_data volume")]
+    P[Prometheus] -.->|scrapes directly, not via Envoy| A & B & C
+    P -.->|/stats/prometheus| E
+    P --> G[Grafana]
+    A & B & C & E -.->|JSON logs via Docker| FB[Filebeat] --> ES[Elasticsearch] --> K[Kibana]
+```
+
+* `app` is **one Compose service scaled to 3 replicas** (`deploy.replicas: 3`). Each replica runs the Flask
+  REST API and the gRPC service in one process (`run_replica.py`), so every replica exposes the same HTTP
+  endpoints and gRPC methods. There are no host ports on the replicas; only Envoy is published.
+* The Compose project name is pinned (`name: petstore-observability`), so the replicas are always the
+  containers `petstore-observability-app-1/2/3`. Envoy and Prometheus address them by these names.
+* **Replica identifier:** each replica asks Docker's DNS which of those names has its own IP and maps
+  1→A, 2→B, 3→C (`replica_identity.py`). The letter appears in every log line (`"replica":"B"`), in the
+  `X-Replica` response header / `x-replica` gRPC metadata, and as the Prometheus target label `replica`.
+* **Request/trace correlation:** Envoy forwards (or creates) `X-Request-ID`; the replica logs it for HTTP and
+  gRPC (`x-request-id` metadata), and Envoy's JSON access log contains the same ID plus `upstream_host` and
+  `replica`.
+
+### Shared or per-replica state
+
+| State | Where it lives | Shared by all replicas? | What happens when requests are spread |
+|---|---|---|---|
+| Products, stock, orders | SQLite file on the `petstore_data` volume | **Shared** | Consistent: every replica reads and writes the same rows; writes use `BEGIN IMMEDIATE`, so SQLite serialises them across containers. |
+| Idempotency records | `idempotency_keys` table in the same SQLite file, written in the same transaction as the order | **Shared** | A retry with the same key returns the original order whichever replica it reaches, so duplicate prevention still holds. |
+| `POST /orders` rate-limit counters | In memory in each process (`_rate_hits` in `app.py`) | **Separate per replica** | Each replica allows 10 per minute, so with round robin a client gets about 30 per minute instead of 10 (with weights 2:1:1 it depends on which replica it hits); a client throttled on A can still succeed on B, and `Retry-After` depends on which replica answered. Fix (not implemented): keep the counters in a shared store (Redis, or a table in the shared database). |
+| `petstore_pending_orders` gauge | Re-read from SQLite on each scrape | Same value on every replica | Summing it across replicas triples it; dashboards must use `max()` (or one replica). |
+
+## What was added
+
+| Area | Files |
+|---|---|
+| One replica = REST + gRPC in one process, replica letter, clean SIGTERM shutdown | `run_replica.py`, `replica_identity.py`, `Dockerfile.app` |
+| Replica letter in logs and response headers, HTTP in-flight gauge, client IP from `X-Forwarded-For` | `app.py`, `metrics.py` |
+| gRPC: request ID and replica in logs, `x-replica` metadata, standard health service (`grpc.health.v1`) | `grpc_server.py`, `requirements-grpc.txt` |
+| Fault for Part D: delay on one named replica only (`PETSTORE_DELAY_REPLICA`, `PETSTORE_DELAY_MS`) | `replica_identity.py`, `app.py`, `grpc_server.py`, `docker-compose.yml` |
+| Envoy configs: Part C round robin (default), Part A baseline, three Part D experiments | `envoy/*.yaml` |
+| Compose: `app` ×3, `envoy`, `loadgen` (tool profile), Filebeat registry volume | `docker-compose.yml` |
+| Prometheus scrapes A, B, C and Envoy directly | `monitoring/prometheus/prometheus.yml` |
+| Envoy and replica logs to Elasticsearch, de-duplicated, event-time `@timestamp` | `monitoring/filebeat/filebeat.yml` |
+| Grafana dashboard "Paws & Cart - A3 Load Balancing (per replica)" (exported JSON) | `monitoring/grafana/provisioning/dashboards/a3-load-balancing.json` |
+| Fixed-rate (open-loop) test client | `client/loadgen.py` |
+| Failure/recovery experiment script, results table generator | `experiments/failure-recovery.ps1`, `client/summarize_runs.py` |
+| Raw results (one JSON per run) and the summary table | `results/` |
+
+## Setup
+
+```powershell
+docker compose up -d --build
+```
+
+| Service | URL / port |
+|---|---|
+| Web page (nginx → Envoy) | http://localhost:5173 |
+| REST API through Envoy | http://localhost:5000 |
+| gRPC through Envoy (HTTP/2, routed per call) | `localhost:50051` |
+| Envoy admin (clusters, stats) | http://localhost:9901/clusters |
+| Prometheus targets | http://localhost:9090/targets (`petstore-app` A/B/C and `envoy`) |
+| Grafana dashboard | http://localhost:3000/d/a3-load-balancing |
+| Kibana | http://localhost:5601 |
+
+Quick checks:
+
+```powershell
+# which replica answered (header added by the replica)
+curl.exe -s -D - -o NUL http://localhost:5000/products | Select-String "x-replica|x-request-id"
+
+# Envoy's view: endpoints, weights and health per cluster
+curl.exe -s http://localhost:9901/clusters | Select-String "::(hostname|weight|health_flags)::"
+```
+
+Each replica logs its letter when it starts:
+
+```powershell
+docker compose logs app | Select-String "replica started"
+```
+
+### Switching Envoy configs (experiments) and restoring
+
+Envoy loads `envoy/${ENVOY_CONFIG}` (default `envoy.yaml` = equal round robin). `--no-deps` makes sure only
+Envoy is restarted and the replicas are left as they are.
+
+| File | Used for |
+|---|---|
+| `envoy/part-a-a-only.yaml` | Parts A/B baseline: HTTP and gRPC to A only |
+| `envoy/envoy.yaml` | **Part C (default):** equal-weight round robin over A, B, C; plus a comparison-only gRPC TCP proxy on `envoy:50052` |
+| `envoy/part-d-weighted.yaml` | D.1: weights A:B:C = 2:1:1 |
+| `envoy/part-d-least-request.yaml` | D.2: least request (power of two choices), equal weights |
+| `envoy/part-d-health-checks.yaml` | D.3: round robin + active health checks (interval 2 s, timeout 1 s, unhealthy after 2, healthy after 2) |
+
+```powershell
+$env:ENVOY_CONFIG = "part-d-weighted.yaml"; docker compose up -d --no-deps envoy     # switch
+Remove-Item Env:ENVOY_CONFIG; docker compose up -d --no-deps envoy                    # restore round robin
+```
+
+`$env:...` stays set for the rest of that PowerShell window, so always run the restore line afterwards.
+
+## Fixed-rate test client
+
+`client/loadgen.py` sends requests at a fixed rate for a fixed duration **without waiting for earlier
+responses** (open loop), with a 2 s timeout, **no retries and no circuit breaker**. It runs inside the Docker
+network against Envoy, using the replica image (it already has gRPC):
+
+```powershell
+docker compose run --rm --no-deps loadgen http --rate 20 --duration 90 --label my-run   # GET /products
+docker compose run --rm --no-deps loadgen grpc --rate 20 --duration 90 --label my-run   # PetStore.ListProducts, one channel
+```
+
+Both operations are read-only, so the tests never use up stock. At the end the client prints and saves
+(`results/<time>-<label>-<interface>-<id>.json`): target and achieved rate, requests sent, successes,
+failures by reason, error rate, client p50/p95/p99/max, the replica that answered each request (from
+`x-replica`), late sends, and the UTC start/end of the run. Every request carries
+`X-Request-ID: <run_id>-<number>`, so it can be found in Kibana.
+
+## Dashboard
+
+**Paws & Cart - A3 Load Balancing (per replica)**, provisioned from
+`monitoring/grafana/provisioning/dashboards/a3-load-balancing.json` (this file is the exported dashboard).
+For HTTP (`GET /products`) and gRPC (`ListProducts`), per replica: request rate, share of total traffic (with a
+dashed 33 % line), share over the selected time range, active requests, p50/p95 response time, and errors by
+status. A third row shows Envoy per cluster (request rate, healthy/total endpoints, connection failures,
+timeouts, 5xx) and the Prometheus scrape status of A, B, C and Envoy.
+
+**Time windows:** rates, shares and percentiles use `rate(...[1m])` (p50/p95 = `histogram_quantile` over
+`rate(..._bucket[1m])`); "share over the selected time range" uses `increase(...[$__range])`, so set the time
+picker to exactly one run. Prometheus scrapes every 5 s. Labels are bounded (replica, route, status, method,
+gRPC code): request IDs are only in logs, never in metric labels.
+
+## Kibana: Envoy event together with the replica event
+
+Data view `petstore-final*` (time field `@timestamp`). One search per interface returns the Envoy access-log
+event and the replica's event for the same request:
+
+```text
+request_id: "rr-equal-http-ecd47c-000100"
+request_id: "rr-equal-grpc-8d3864-000100"
+```
+
+Useful fields: `service` (`envoy`, `pet-store`, `pet-store-grpc`), `replica`, `listener` (`http`/`grpc`),
+`upstream_host`, `status_code`, `grpc_status`/`grpc_code`, `duration_ms`. Distribution of one run as Envoy
+recorded it: `service: "envoy" and request_id.keyword: rr-equal-http-ecd47c-*`, then the field `replica` →
+"Visualize". Envoy's health-check events (D.3) are found with `health_checker_type: *`.
+
+## Experiments (Parts B, C, D) and recovery commands
+
+All runs use the same workload: **20 requests/s for 90 s (1800 requests) per interface**. Run HTTP and gRPC
+one after the other, not at the same time.
+
+```powershell
+# Part B - baseline: Envoy sends everything to A, B and C run idle
+$env:ENVOY_CONFIG = "part-a-a-only.yaml"; docker compose up -d --no-deps envoy
+docker compose run --rm --no-deps loadgen http --rate 20 --duration 90 --label baseline-A-only
+docker compose run --rm --no-deps loadgen grpc --rate 20 --duration 90 --label baseline-A-only
+Remove-Item Env:ENVOY_CONFIG; docker compose up -d --no-deps envoy                    # restore
+
+# Part C - equal round robin (default config)
+docker compose run --rm --no-deps loadgen http --rate 20 --duration 90 --label rr-equal
+docker compose run --rm --no-deps loadgen grpc --rate 20 --duration 90 --label rr-equal
+# the same gRPC workload through a plain TCP proxy: every call stays on one replica
+docker compose run --rm --no-deps loadgen grpc --target envoy:50052 --rate 20 --duration 90 --label rr-grpc-tcp-proxy
+
+# D.1 - weighted round robin 2:1:1
+$env:ENVOY_CONFIG = "part-d-weighted.yaml"; docker compose up -d --no-deps envoy
+docker compose run --rm --no-deps loadgen http --rate 20 --duration 90 --label d1-weighted-2-1-1
+docker compose run --rm --no-deps loadgen grpc --rate 20 --duration 90 --label d1-weighted-2-1-1
+Remove-Item Env:ENVOY_CONFIG; docker compose up -d --no-deps envoy                    # restore
+
+# D.2 - 200 ms delay on B, once with round robin and once with least request
+$env:PETSTORE_DELAY_REPLICA = "B"; $env:PETSTORE_DELAY_MS = "200"; docker compose up -d app
+docker compose run --rm --no-deps loadgen http --rate 20 --duration 90 --label d2-rr-delayB200
+docker compose run --rm --no-deps loadgen grpc --rate 20 --duration 90 --label d2-rr-delayB200
+$env:ENVOY_CONFIG = "part-d-least-request.yaml"; docker compose up -d --no-deps envoy
+docker compose run --rm --no-deps loadgen http --rate 20 --duration 90 --label d2-leastreq-delayB200
+docker compose run --rm --no-deps loadgen grpc --rate 20 --duration 90 --label d2-leastreq-delayB200
+Remove-Item Env:ENVOY_CONFIG; docker compose up -d --no-deps envoy                    # restore round robin
+Remove-Item Env:PETSTORE_DELAY_*; docker compose up -d app                            # remove the delay
+
+# D.3 - failure and recovery: stop B at +20 s, start it at +50 s (health checks on); restores itself
+.\experiments\failure-recovery.ps1 -Interface http
+.\experiments\failure-recovery.ps1 -Interface grpc
+
+# Results table for all runs (client + Prometheus + Envoy access log) -> results/summary.md
+docker compose run --rm --no-deps --entrypoint python loadgen client/summarize_runs.py
+```
+
+If anything is left in an experiment state, this restores normal behaviour:
+
+```powershell
+Remove-Item Env:ENVOY_CONFIG, Env:PETSTORE_DELAY_REPLICA, Env:PETSTORE_DELAY_MS -ErrorAction SilentlyContinue
+docker compose up -d app envoy
+docker compose start app                                                              # in case B is stopped
+curl.exe -s http://localhost:9901/clusters | Select-String "::health_flags::"
+```
+
+## Results (from `results/summary.md`)
+
+| Run / interface | Policy and fault | A / B / C share % (target) | Client p95 ms | Errors |
+|---|---|---|---|---|
+| Baseline / HTTP | A only | 100 / 0 / 0 (100 / 0 / 0) | 26.3 | 0 % |
+| Baseline / gRPC | A only | 100 / 0 / 0 (100 / 0 / 0) | 10.0 | 0 % |
+| Round robin / HTTP | equal weights | 33.3 / 33.3 / 33.3 (33 each) | 8.8 | 0 % |
+| Round robin / gRPC | equal weights, HTTP/2 listener | 33.3 / 33.3 / 33.3 (33 each) | 8.2 | 0 % |
+| Round robin / gRPC via TCP proxy | per connection | 100 / 0 / 0 (33 each) | 6.9 | 0 % |
+| D.1 weighted / HTTP | 2:1:1 | 49.9 / 25.1 / 25.0 (50 / 25 / 25) | 10.2 | 0 % |
+| D.1 weighted / gRPC | 2:1:1 | 50.0 / 25.0 / 25.0 (50 / 25 / 25) | 8.7 | 0 % |
+| D.2 round robin / HTTP | B +200 ms | 33.3 / 33.4 / 33.3 | 209.2 | 0 % |
+| D.2 round robin / gRPC | B +200 ms | 33.3 / 33.3 / 33.3 | 208.4 | 0 % |
+| D.2 least request / HTTP | B +200 ms | 39.5 / 19.7 / 40.8 | 212.2 | 0 % |
+| D.2 least request / gRPC | B +200 ms | 42.3 / 17.9 / 39.8 | 208.3 | 0 % |
+| D.3 failure / HTTP | B stopped 30 s | 40.7 / 18.9 / 40.5 | 13.7 | 1.33 % (24 × 503) |
+| D.3 failure / gRPC | B stopped 30 s | 39.5 / 20.9 / 39.6 | 11.0 | 1.78 % (32 × UNAVAILABLE) |
+
+Per-replica counts from Envoy's access log, server-side p95 and active requests for every run are in
+`results/summary.md`; the D.3 timelines (stop, unhealthy, restart, healthy) are in `results/*-timeline.json`.
+
+## Tests
+
+The A2 test command still works and all 45 tests pass (the gRPC health service is optional, so the tests do
+not need `grpcio-health-checking`).
+
+## Known issues found while building Assignment 3
+
+* **nginx → Envoy returned `426 Upgrade Required`.** nginx proxies with HTTP/1.0 by default and Envoy rejects
+  HTTP/1.0; fixed with `proxy_http_version 1.1;` in `frontend/nginx.conf`.
+* **Envoy events looked 9 s later than the replica's.** Envoy flushes its access log about every 10 s and
+  Filebeat stamped the write time; Filebeat now sets `@timestamp` from the event's own `time` field.
+* **Duplicate events in Elasticsearch after recreating Filebeat** (its registry was inside the container).
+  Fixed with a `filebeat_data` volume and a fingerprint document ID (file + offset), so a re-read overwrites.
+* **First gRPC round-robin run stalled.** The test client read gRPC metadata inside gRPC's completion callback,
+  which can deadlock gRPC's callback thread. The callback now only records the time; the result of that run
+  is kept, unused, in `results/invalid/` with an explanation.
+* **`docker stop` took 10 s** because Python as PID 1 ignored SIGTERM, so B kept serving during the failure
+  test. `run_replica.py` now stops on SIGTERM and sets the gRPC health status to NOT_SERVING.
+* **Docker Desktop crashed once during the build;** afterwards some containers had no working host port and a
+  frontend image contained an empty nginx config. Restarting those containers and rebuilding the frontend
+  without cache fixed it. Short (about 40 s) Docker networking stalls were also seen; runs where it happened
+  show `late_sends` > 0 in their result file.
+
+## Sources and reuse (Assignment 3)
+
+* Envoy documentation: load balancing policies (round robin, weighted, least request / power of two choices),
+  active health checking (`interval`, `timeout`, `unhealthy_threshold`, `healthy_threshold`,
+  health-check event sinks), HTTP connection manager, TCP proxy, access-log format operators.
+* gRPC Health Checking Protocol (`grpc.health.v1`) and the `grpcio-health-checking` package.
+* Builds on this repository's Assignment 1 (metrics, dashboards, ELK) and Assignment 2 (REST API, gRPC
+  service, idempotency, rate limiting) code.

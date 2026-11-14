@@ -1,0 +1,30 @@
+{
+  "run_id": "rr-grpc-tcp-proxy-grpc-e1d6e4",
+  "label": "rr-grpc-tcp-proxy",
+  "interface": "grpc",
+  "operation": "PetStore.ListProducts",
+  "target": "envoy:50052",
+  "target_rate_per_s": 20.0,
+  "duration_s": 90.0,
+  "achieved_send_rate_per_s": 20.0,
+  "sent": 1800,
+  "successes": 1800,
+  "failures": 0,
+  "error_rate_percent": 0.0,
+  "failures_by_reason": {},
+  "client_latency_ms": {
+    "p50": 4.88,
+    "p95": 6.92,
+    "p99": 9.91,
+    "max": 51.04
+  },
+  "replica_counts": {
+    "A": 1800
+  },
+  "replica_share_percent": {
+    "A": 100.0
+  },
+  "late_sends": 0,
+  "started_utc": "2026-11-08T14:14:12+00:00",
+  "ended_utc": "2026-11-08T14:15:42+00:00"
+}

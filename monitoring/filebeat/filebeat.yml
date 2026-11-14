@@ -3,12 +3,17 @@ filebeat.autodiscover:
     - type: docker
       host: unix:///var/run/docker.sock
       templates:
+        # A3: the three app replicas and Envoy (JSON access log) are both shipped, so one search
+        # on request_id returns the Envoy event together with the replica's event.
         - condition:
-            equals:
-              docker.container.labels.com.petstore.role: backend
+            or:
+              - equals:
+                  docker.container.labels.com.petstore.role: app
+              - equals:
+                  docker.container.labels.com.petstore.role: envoy
           config:
             - type: filestream
-              id: petstore-backend-${data.docker.container.id}
+              id: petstore-${data.docker.container.id}
               paths:
                 - /var/lib/docker/containers/${data.docker.container.id}/*.log
               parsers:
@@ -21,6 +26,25 @@ filebeat.autodiscover:
                     target: ""
                     overwrite_keys: true
                     add_error_key: true
+                # A3: use the event's own "time" (request start for Envoy) as @timestamp. Envoy
+                # flushes its access log about every 10 s, so the time the line was written can be
+                # several seconds after the request; this keeps Envoy and replica events aligned.
+                - timestamp:
+                    field: time
+                    layouts:
+                      - "2006-01-02T15:04:05.999999999Z07:00"
+                      - "2006-01-02T15:04:05.999Z"
+                    test:
+                      - "2026-11-08T13:52:47.139000+00:00"
+                      - "2026-11-08T13:52:47.139Z"
+                    ignore_missing: true
+                    ignore_failure: true
+                # A3: the same log line always gets the same document _id, so if Filebeat ever
+                # re-reads a file (e.g. after losing its registry) Elasticsearch overwrites the
+                # document instead of storing a duplicate.
+                - fingerprint:
+                    fields: [log.file.path, log.offset]
+                    target_field: "@metadata._id"
 
 processors:
   - add_docker_metadata:

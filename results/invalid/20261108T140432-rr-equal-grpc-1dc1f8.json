@@ -1,0 +1,37 @@
+{
+  "run_id": "rr-equal-grpc-1dc1f8",
+  "label": "rr-equal",
+  "interface": "grpc",
+  "operation": "PetStore.ListProducts",
+  "target": "envoy:50051",
+  "target_rate_per_s": 20.0,
+  "duration_s": 90.0,
+  "achieved_send_rate_per_s": 20.0,
+  "sent": 1800,
+  "successes": 1329,
+  "failures": 471,
+  "unfinished": 0,
+  "error_rate_percent": 26.17,
+  "failures_by_reason": {
+    "timeout": 471
+  },
+  "client_latency_ms": {
+    "p50": 9.44,
+    "p95": 1153.53,
+    "p99": 1756.82,
+    "max": 2708.35
+  },
+  "replica_counts": {
+    "A": 415,
+    "B": 460,
+    "C": 454
+  },
+  "replica_share_percent": {
+    "A": 31.2,
+    "B": 34.6,
+    "C": 34.2
+  },
+  "late_sends": 547,
+  "started_utc": "2026-11-08T14:04:32+00:00",
+  "ended_utc": "2026-11-08T14:10:47+00:00"
+}

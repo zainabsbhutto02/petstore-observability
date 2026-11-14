@@ -1,0 +1,35 @@
+{
+  "run_id": "rr-equal-http-ecd47c",
+  "label": "rr-equal",
+  "interface": "http",
+  "operation": "GET /products",
+  "target": "envoy:5000",
+  "target_rate_per_s": 20.0,
+  "duration_s": 90.0,
+  "achieved_send_rate_per_s": 20.0,
+  "sent": 1800,
+  "successes": 1800,
+  "failures": 0,
+  "unfinished": 0,
+  "error_rate_percent": 0.0,
+  "failures_by_reason": {},
+  "client_latency_ms": {
+    "p50": 5.96,
+    "p95": 8.81,
+    "p99": 11.94,
+    "max": 80.41
+  },
+  "replica_counts": {
+    "A": 600,
+    "B": 600,
+    "C": 600
+  },
+  "replica_share_percent": {
+    "A": 33.3,
+    "B": 33.3,
+    "C": 33.3
+  },
+  "late_sends": 0,
+  "started_utc": "2026-11-08T14:02:56+00:00",
+  "ended_utc": "2026-11-08T14:04:26+00:00"
+}

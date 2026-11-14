@@ -43,6 +43,14 @@ petstore_http_request_duration_seconds = Histogram(
     ),
 )
 
+# A3: HTTP counterpart of grpc_server_in_flight_requests, so the dashboard can show active
+# requests per replica for both interfaces. No labels; /metrics and /health are not counted
+# (otherwise every scrape would see itself as one active request).
+petstore_http_requests_in_flight = Gauge(
+    "petstore_http_requests_in_flight",
+    "HTTP requests currently being handled (excludes /metrics and /health).",
+)
+
 petstore_order_processing_seconds = Summary(
     "petstore_order_processing_seconds",
     "Processing time for successful order creation requests.",

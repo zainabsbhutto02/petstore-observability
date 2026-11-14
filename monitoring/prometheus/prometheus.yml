@@ -7,15 +7,23 @@ scrape_configs:
     static_configs:
       - targets: ["localhost:9090"]
 
-  - job_name: "petstore-backend"
+  # A3: each replica is scraped directly by its container name, never through Envoy, so a
+  # scrape always reaches the replica it is labelled with. One target per replica exposes both
+  # the HTTP and the gRPC metrics (run_replica.py). "replica" has three values (bounded).
+  - job_name: "petstore-app"
     metrics_path: /metrics
     static_configs:
-      - targets: ["backend:5000"]
+      - targets: ["petstore-observability-app-1:5000"]
+        labels: { replica: "A" }
+      - targets: ["petstore-observability-app-2:5000"]
+        labels: { replica: "B" }
+      - targets: ["petstore-observability-app-3:5000"]
+        labels: { replica: "C" }
 
-  - job_name: "petstore-grpc"
-    metrics_path: /metrics
+  - job_name: "envoy"
+    metrics_path: /stats/prometheus
     static_configs:
-      - targets: ["grpc-service:8001"]
+      - targets: ["envoy:9901"]
 
   - job_name: "node-exporter"
     static_configs:

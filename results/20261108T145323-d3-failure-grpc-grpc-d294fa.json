@@ -1,0 +1,36 @@
+{
+  "run_id": "d3-failure-grpc-grpc-d294fa",
+  "label": "d3-failure-grpc",
+  "interface": "grpc",
+  "operation": "PetStore.ListProducts",
+  "target": "envoy:50051",
+  "target_rate_per_s": 20.0,
+  "duration_s": 90.0,
+  "achieved_send_rate_per_s": 20.0,
+  "sent": 1800,
+  "successes": 1768,
+  "failures": 32,
+  "error_rate_percent": 1.78,
+  "failures_by_reason": {
+    "grpc_UNAVAILABLE": 32
+  },
+  "client_latency_ms": {
+    "p50": 6.77,
+    "p95": 11.03,
+    "p99": 62.25,
+    "max": 300.47
+  },
+  "replica_counts": {
+    "A": 699,
+    "B": 369,
+    "C": 700
+  },
+  "replica_share_percent": {
+    "A": 39.5,
+    "B": 20.9,
+    "C": 39.6
+  },
+  "late_sends": 0,
+  "started_utc": "2026-11-08T14:53:23+00:00",
+  "ended_utc": "2026-11-08T14:54:53+00:00"
+}

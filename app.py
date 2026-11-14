@@ -18,10 +18,12 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from database import get_connection, initialize_database
 from metrics import (
     petstore_http_request_duration_seconds,
+    petstore_http_requests_in_flight,
     petstore_order_processing_seconds,
     petstore_orders_total,
     update_pending_orders_gauge,
 )
+from replica_identity import INJECTED_DELAY_SECONDS, REPLICA_ID
 
 
 class JsonLogFormatter(logging.Formatter):
@@ -31,6 +33,7 @@ class JsonLogFormatter(logging.Formatter):
         event = {
             "time": datetime.now(timezone.utc).isoformat(),
             "service": "pet-store",
+            "replica": REPLICA_ID,   # A3: which replica (A/B/C) handled the request
             "severity": record.levelname,
             "message": record.getMessage(),
             "request_id": getattr(record, "request_id", None),
@@ -69,15 +72,32 @@ def normalized_route():
 # see the Part E report for that finding).
 _INJECT_DELAY = os.environ.get("PETSTORE_INJECT_DELAY", "false").lower() == "true"
 _request_counter = _count(1)
+_NOT_COUNTED_IN_FLIGHT = {"/metrics", "/health"}
 
 
 @app.before_request
 def record_request_duration_start():
     """Set correlation data and store request start time."""
+    # Envoy creates X-Request-ID when the client did not send one and forwards it here,
+    # so the Envoy access log and this replica's log share the same ID.
     g.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request._petstore_start_time = time.perf_counter()
+    g.counted_in_flight = request.path not in _NOT_COUNTED_IN_FLIGHT
+    if g.counted_in_flight:
+        petstore_http_requests_in_flight.inc()
+        if INJECTED_DELAY_SECONDS:
+            # A3 Part D: this replica was chosen as the slow one (PETSTORE_DELAY_REPLICA). The sleep
+            # is inside the timed, in-flight part of the request, so it shows in p95 and active.
+            time.sleep(INJECTED_DELAY_SECONDS)
     if _INJECT_DELAY and next(_request_counter) % 5 == 0:
         time.sleep(0.5)
+
+
+@app.teardown_request
+def release_in_flight(_error=None):
+    """Runs even when a handler raises, so the in-flight gauge cannot drift upwards."""
+    if g.pop("counted_in_flight", False):
+        petstore_http_requests_in_flight.dec()
 
 
 @app.after_request
@@ -108,6 +128,7 @@ def record_request_duration(response):
         },
     )
     response.headers["X-Request-ID"] = g.request_id
+    response.headers["X-Replica"] = REPLICA_ID   # A3: Envoy writes this into its access log
     return response
 
 
@@ -153,7 +174,16 @@ _rate_lock = threading.Lock()
 
 
 def client_ip():
-    return request.headers.get("X-Real-IP") or request.remote_addr or "unknown"
+    # nginx sets X-Real-IP. A client calling Envoy directly does not, and remote_addr would then
+    # be Envoy's own address for everyone, so use the address Envoy appended last to
+    # X-Forwarded-For (use_remote_address: true in envoy/envoy.yaml).
+    real_ip = request.headers.get("X-Real-IP")
+    if real_ip:
+        return real_ip
+    forwarded = [part.strip() for part in request.headers.get("X-Forwarded-For", "").split(",")]
+    if forwarded and forwarded[-1]:
+        return forwarded[-1]
+    return request.remote_addr or "unknown"
 
 
 def check_rate_limit(ip, now=None):

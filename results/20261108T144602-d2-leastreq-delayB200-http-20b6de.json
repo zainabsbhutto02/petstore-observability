@@ -1,0 +1,34 @@
+{
+  "run_id": "d2-leastreq-delayB200-http-20b6de",
+  "label": "d2-leastreq-delayB200",
+  "interface": "http",
+  "operation": "GET /products",
+  "target": "envoy:5000",
+  "target_rate_per_s": 20.0,
+  "duration_s": 90.0,
+  "achieved_send_rate_per_s": 20.0,
+  "sent": 1800,
+  "successes": 1800,
+  "failures": 0,
+  "error_rate_percent": 0.0,
+  "failures_by_reason": {},
+  "client_latency_ms": {
+    "p50": 8.2,
+    "p95": 212.21,
+    "p99": 373.91,
+    "max": 1161.59
+  },
+  "replica_counts": {
+    "A": 711,
+    "B": 355,
+    "C": 734
+  },
+  "replica_share_percent": {
+    "A": 39.5,
+    "B": 19.7,
+    "C": 40.8
+  },
+  "late_sends": 16,
+  "started_utc": "2026-11-08T14:46:02+00:00",
+  "ended_utc": "2026-11-08T14:47:32+00:00"
+}

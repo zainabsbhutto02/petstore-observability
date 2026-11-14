@@ -1,0 +1,1 @@
+Not used in the report. rr-equal-grpc-1dc1f8 was run with an earlier client/loadgen.py whose gRPC completion callback could deadlock gRPC's callback thread; the run stalled and its 471 'timeouts' are client artefacts. The fixed client re-ran it as rr-equal-grpc-8d3864 (1800/1800 OK).

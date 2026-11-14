@@ -1,0 +1,112 @@
+{
+  "run_id": "d3-failure-grpc-grpc-d294fa",
+  "interface": "grpc",
+  "cluster": "grpc_replicas",
+  "health_check": "interval 2s, timeout 1s, unhealthy_threshold 2, healthy_threshold 2",
+  "workload_started_utc": "2026-11-08T14:53:23.3863469+00:00",
+  "stop_at_s": 20,
+  "start_at_s": 50,
+  "events": [
+    {
+      "t_s": 0.31,
+      "utc": "14:53:23.704",
+      "event": "Envoy http_replicas : B is healthy"
+    },
+    {
+      "t_s": 0.34,
+      "utc": "14:53:23.726",
+      "event": "Envoy grpc_replicas : B is healthy"
+    },
+    {
+      "t_s": 20.05,
+      "utc": "14:53:43.437",
+      "event": "docker stop petstore-observability-app-2 (issued)"
+    },
+    {
+      "t_s": 24.67,
+      "utc": "14:53:48.060",
+      "event": "docker stop returned (B is down)"
+    },
+    {
+      "t_s": 24.75,
+      "utc": "14:53:48.140",
+      "event": "Envoy http_replicas : B is unhealthy (failed_active_health_check)"
+    },
+    {
+      "t_s": 26.71,
+      "utc": "14:53:50.094",
+      "event": "Envoy grpc_replicas : B is unhealthy (failed_active_health_check,active_hc_timeout)"
+    },
+    {
+      "t_s": 27.83,
+      "utc": "14:53:51.220",
+      "event": "Envoy http_replicas : B is absent"
+    },
+    {
+      "t_s": 27.84,
+      "utc": "14:53:51.222",
+      "event": "Envoy grpc_replicas : B is absent"
+    },
+    {
+      "t_s": 50.17,
+      "utc": "14:54:13.562",
+      "event": "docker start petstore-observability-app-2 (issued)"
+    },
+    {
+      "t_s": 51.88,
+      "utc": "14:54:15.270",
+      "event": "docker start returned (B process starting)"
+    },
+    {
+      "t_s": 51.95,
+      "utc": "14:54:15.336",
+      "event": "Envoy http_replicas : B is unhealthy (failed_active_health_check)"
+    },
+    {
+      "t_s": 55.86,
+      "utc": "14:54:19.253",
+      "event": "Envoy grpc_replicas : B is healthy"
+    },
+    {
+      "t_s": 58.14,
+      "utc": "14:54:21.524",
+      "event": "Envoy http_replicas : B is healthy"
+    }
+  ],
+  "client_summary": {
+    "run_id": "d3-failure-grpc-grpc-d294fa",
+    "label": "d3-failure-grpc",
+    "interface": "grpc",
+    "operation": "PetStore.ListProducts",
+    "target": "envoy:50051",
+    "target_rate_per_s": 20.0,
+    "duration_s": 90.0,
+    "achieved_send_rate_per_s": 20.0,
+    "sent": 1800,
+    "successes": 1768,
+    "failures": 32,
+    "error_rate_percent": 1.78,
+    "failures_by_reason": {
+      "grpc_UNAVAILABLE": 32
+    },
+    "client_latency_ms": {
+      "p50": 6.77,
+      "p95": 11.03,
+      "p99": 62.25,
+      "max": 300.47
+    },
+    "replica_counts": {
+      "A": 699,
+      "B": 369,
+      "C": 700
+    },
+    "replica_share_percent": {
+      "A": 39.5,
+      "B": 20.9,
+      "C": 39.6
+    },
+    "late_sends": 0,
+    "started_utc": "2026-11-08T19:53:23+05:00",
+    "ended_utc": "2026-11-08T19:54:53+05:00"
+  }
+}

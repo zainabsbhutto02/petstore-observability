@@ -1,0 +1,221 @@
+# Envoy front proxy for Assignment 3 - PART D.2: LEAST REQUEST (equal weights)
+#
+# Only change from envoy.yaml: lb_policy LEAST_REQUEST (choice_count 2) in http_replicas and grpc_replicas.
+# Run together with the delay on B (PETSTORE_DELAY_REPLICA=B) and compare with the round-robin run.
+#
+# Use:     $env:ENVOY_CONFIG = "part-d-least-request.yaml"; docker compose up -d envoy
+# Restore: Remove-Item Env:ENVOY_CONFIG; docker compose up -d envoy   (back to envoy.yaml, equal round robin)
+# No retries are configured on any route.
+
+admin:
+  address:
+    socket_address: { address: 0.0.0.0, port_value: 9901 }
+
+static_resources:
+  listeners:
+    - name: http_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 5000 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: http_ingress
+                codec_type: AUTO
+                use_remote_address: true        # append the caller's address to X-Forwarded-For
+                generate_request_id: true       # create X-Request-ID when the client sent none
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        json_format:
+                          time: "%START_TIME%"
+                          service: "envoy"
+                          listener: "http"
+                          message: "Envoy access log"
+                          request_id: "%REQ(X-REQUEST-ID)%"
+                          method: "%REQ(:METHOD)%"
+                          route: "%REQ(:PATH)%"
+                          protocol: "%PROTOCOL%"
+                          status_code: "%RESPONSE_CODE%"
+                          response_flags: "%RESPONSE_FLAGS%"
+                          duration_ms: "%DURATION%"
+                          upstream_cluster: "%UPSTREAM_CLUSTER%"
+                          upstream_host: "%UPSTREAM_HOST%"
+                          replica: "%RESP(X-REPLICA)%"
+                route_config:
+                  name: http_route
+                  virtual_hosts:
+                    - name: petstore_http
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: http_replicas
+                            timeout: 5s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+    - name: grpc_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 50051 }
+      filter_chains:
+        - filters:
+            # HTTP connection manager (not tcp_proxy): Envoy decodes HTTP/2, so it sees each
+            # gRPC call as its own request and picks a replica per call.
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: grpc_ingress
+                codec_type: HTTP2
+                use_remote_address: true
+                generate_request_id: true
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        json_format:
+                          time: "%START_TIME%"
+                          service: "envoy"
+                          listener: "grpc"
+                          message: "Envoy access log"
+                          request_id: "%REQ(X-REQUEST-ID)%"
+                          method: "%REQ(:METHOD)%"
+                          route: "%REQ(:PATH)%"
+                          protocol: "%PROTOCOL%"
+                          status_code: "%RESPONSE_CODE%"
+                          grpc_status: "%GRPC_STATUS%"
+                          response_flags: "%RESPONSE_FLAGS%"
+                          duration_ms: "%DURATION%"
+                          upstream_cluster: "%UPSTREAM_CLUSTER%"
+                          upstream_host: "%UPSTREAM_HOST%"
+                          replica: "%RESP(X-REPLICA)%"
+                route_config:
+                  name: grpc_route
+                  virtual_hosts:
+                    - name: petstore_grpc
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          route:
+                            cluster: grpc_replicas
+                            timeout: 5s
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+    # Comparison only: gRPC through a plain TCP proxy. Envoy cannot see individual calls here,
+    # so it balances CONNECTIONS. A client with one channel (one connection) sends every call to
+    # the single replica chosen when the connection opened. Not published on the host; the
+    # loadgen container reaches it as envoy:50052.
+    - name: grpc_tcp_listener
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 50052 }
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.tcp_proxy
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+                stat_prefix: grpc_tcp
+                cluster: grpc_replicas_tcp
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        json_format:
+                          time: "%START_TIME%"
+                          service: "envoy"
+                          listener: "grpc_tcp"
+                          message: "Envoy TCP connection closed"
+                          duration_ms: "%DURATION%"
+                          upstream_cluster: "%UPSTREAM_CLUSTER%"
+                          upstream_host: "%UPSTREAM_HOST%"
+                          bytes_received: "%BYTES_RECEIVED%"
+                          bytes_sent: "%BYTES_SENT%"
+
+  clusters:
+    - name: http_replicas
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 2s
+      connect_timeout: 1s
+      lb_policy: LEAST_REQUEST
+      least_request_lb_config:
+        choice_count: 2        # power of two choices: pick 2 replicas at random, use the one with fewer active requests
+      load_assignment:
+        cluster_name: http_replicas
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  hostname: A
+                  address:
+                    socket_address: { address: petstore-observability-app-1, port_value: 5000 }
+              - endpoint:
+                  hostname: B
+                  address:
+                    socket_address: { address: petstore-observability-app-2, port_value: 5000 }
+              - endpoint:
+                  hostname: C
+                  address:
+                    socket_address: { address: petstore-observability-app-3, port_value: 5000 }
+
+    - name: grpc_replicas
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 2s
+      connect_timeout: 1s
+      lb_policy: LEAST_REQUEST
+      least_request_lb_config:
+        choice_count: 2        # power of two choices: pick 2 replicas at random, use the one with fewer active requests
+      typed_extension_protocol_options:
+        envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+          "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+          explicit_http_config:
+            http2_protocol_options: {}
+      load_assignment:
+        cluster_name: grpc_replicas
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  hostname: A
+                  address:
+                    socket_address: { address: petstore-observability-app-1, port_value: 50051 }
+              - endpoint:
+                  hostname: B
+                  address:
+                    socket_address: { address: petstore-observability-app-2, port_value: 50051 }
+              - endpoint:
+                  hostname: C
+                  address:
+                    socket_address: { address: petstore-observability-app-3, port_value: 50051 }
+
+    # Comparison only (listener :50052): gRPC through a plain TCP proxy.
+    - name: grpc_replicas_tcp
+      type: STRICT_DNS
+      dns_lookup_family: V4_ONLY
+      dns_refresh_rate: 2s
+      connect_timeout: 1s
+      lb_policy: ROUND_ROBIN
+      load_assignment:
+        cluster_name: grpc_replicas_tcp
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  hostname: A
+                  address:
+                    socket_address: { address: petstore-observability-app-1, port_value: 50051 }
+              - endpoint:
+                  hostname: B
+                  address:
+                    socket_address: { address: petstore-observability-app-2, port_value: 50051 }
+              - endpoint:
+                  hostname: C
+                  address:
+                    socket_address: { address: petstore-observability-app-3, port_value: 50051 }
