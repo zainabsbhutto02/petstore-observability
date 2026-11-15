@@ -12,6 +12,7 @@
 \usepackage{array}
 \usepackage{xcolor}
 \usepackage{float}
+\usepackage[section]{placeins}
 \usepackage{tikz}
 \usetikzlibrary{positioning,arrows.meta,calc}
 \usepackage[font=small,labelfont=bf]{caption}
@@ -59,7 +60,7 @@ dashboard, taken for each test's own time window. Grafana shows local time (UTC+
 
 \subsection{Architecture}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \begin{tikzpicture}[font=\scriptsize, node distance=4mm and 9mm,
   box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, minimum height=7mm},
@@ -100,7 +101,7 @@ send everything to \textbf{A only}. B and C keep running but are not Envoy desti
 (\code{"replica":"B"}) and to every response (header \code{X-Replica}). In Prometheus each replica is a separate target
 with the label \code{replica}.
 \item \textbf{Request correlation.} Envoy gives every request an \code{X-Request-ID} (or keeps the client's) and
-passes it on, for gRPC too. Envoy and the replica both log this ID, so one search finds both events
+passes it on, for gRPC too. This request ID is the trace ID of my system. Envoy and the replica both log this ID, so one search finds both events
 (Section~\ref{sec:logs}).
 \end{itemize}
 
@@ -170,7 +171,8 @@ Request rate & \code{sum by (replica) (rate(petstore\_http\_request\_duration\_s
 Share of total & replica rate $\div$ total rate, with a dashed line at 33\,\% & 1 minute \\
 Share over the time range & \code{increase(...[\$\_\_range])} per replica $\div$ total & whole chosen range \\
 Active requests & \code{petstore\_http\_requests\_in\_flight}, \code{grpc\_server\_in\_flight\_requests} & 5\,s samples \\
-p50 / p95 time & \code{histogram\_quantile(0.95, sum by (replica, le) (rate(..\_bucket[1m])))} & 1 minute \\
+p50 / p95 time & \code{histogram\_quantile(0.95, sum by (replica, le) (rate(..\_bucket[1m])))}, and the same with
+\code{0.50} for p50 & 1 minute \\
 Errors by status & non-2xx HTTP codes or non-OK gRPC codes, plus errors created by Envoy & 1 minute \\
 \bottomrule
 \end{tabularx}
@@ -181,7 +183,7 @@ Errors by status & non-2xx HTTP codes or non-OK gRPC codes, plus errors created 
 Metric labels only take a few fixed values (replica, route, status code, gRPC method). Request IDs are never used as
 labels; they appear only in logs.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \shot[0.8\textwidth]{prom-targets-app.jpg}{Targets A, B and C (job \code{petstore-app})}
 \\[4pt]
@@ -194,10 +196,23 @@ metrics page. All four targets are UP.}
 \section{Part B: Baseline, Envoy sends everything to A}
 
 \textbf{Observed.} A handled \textbf{all} requests and calls. B and C were running and healthy but idle, as expected
-(Figure~\ref{fig:baseline}). The client got 1800 out of 1800 successful answers on both interfaces. Client p95 was
-26.3\,ms for HTTP and 10.0\,ms for gRPC.
+(Figure~\ref{fig:baseline}). Table~\ref{tab:baseline} gives the client's results.
 
-\begin{figure}[H]
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}l c c c c c@{}}
+\toprule
+Interface & Target / actual rate & Requests sent & Successes & Failures & Client p95 \\
+\midrule
+HTTP (\code{GET /products}) & 20 / 20 per s & 1800 & 1800 & 0 & 26.3\,ms \\
+gRPC (\code{ListProducts}) & 20 / 20 per s & 1800 & 1800 & 0 & 10.0\,ms \\
+\bottomrule
+\end{tabular}
+\caption{Part B baseline, client results (90-second run, Envoy sends everything to A).}
+\label{tab:baseline}
+\end{table}
+
+\begin{figure}[!htbp]
 \centering
 \shot{b-http-rate.jpg}{HTTP request rate per replica}
 \hfill
@@ -206,9 +221,25 @@ metrics page. All four targets are UP.}
 \shot{b-grpc-rate.jpg}{gRPC call rate per replica}
 \hfill
 \shot{b-grpc-share.jpg}{gRPC share over the run: A 100\,\%}
+\\[4pt]
+\shot{b-http-p95.jpg}{HTTP p50 / p95 on A (1-minute window)}
+\hfill
+\shot{b-grpc-p95.jpg}{gRPC p50 / p95 on A (1-minute window)}
+\\[4pt]
+\shot{b-http-active.jpg}{Active HTTP requests: 0 at every chart point}
+\hfill
+\shot{b-grpc-active.jpg}{Active gRPC calls: 0 at every chart point}
 \caption{Part B baseline (HTTP run, then gRPC run). Only A has traffic; B and C stay at 0.}
 \label{fig:baseline}
 \end{figure}
+
+\textbf{Response time, active requests and errors.} On A, p50 was about 2.5\,ms and p95 about 4.8\,ms for both
+interfaces. The one HTTP p95 peak of 13\,ms is the short Docker pause that also raised the client's p95. The active
+requests charts stay at 0 because each request takes only about 5\,ms: at 20 requests per second, A has on average
+$20 \times 0.005 = 0.1$ requests in progress. Prometheus sampled A 19 times during each run (every 5\,s), and only one
+sample per run caught a request in progress (value 1). The chart draws a point only every 15\,s, so it shows 0. B and C
+never had a request in progress. Both errors panels
+stayed at 0, matching the client's 0 failures.
 
 \subsection{Logs: the Envoy event together with the replica event}
 \label{sec:logs}
@@ -228,7 +259,7 @@ that they show replicas other than A:
 \code{ListProducts}, code OK.
 \end{itemize}
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \shot[\textwidth]{kibana-http.jpg}{HTTP: one search returns the replica event (\code{pet-store}, B) and the Envoy event (B, 172.18.0.10:5000).}
 \\[4pt]
@@ -257,7 +288,7 @@ through it. Through Envoy's HTTP/2 listener that single connection was split 600
 call. Through the TCP-proxy listener, Envoy only sees the connection, so it chose a replica once and
 \textbf{all 1800 calls went to A} (Figure~\ref{fig:rr}e).
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \shot{c-http-sharets.jpg}{HTTP share over time: all three on the 33\,\% line}
 \hfill
@@ -287,21 +318,25 @@ afterwards. Client retries and circuit breakers were off.
 
 \obs The shares were 49.8 / 25.1 / 25.1\,\% for HTTP and 50.8 / 24.5 / 24.6\,\% for gRPC in Grafana
 (Figure~\ref{fig:d1}). Envoy's log counted 899 / 451 / 450 and 900 / 450 / 450. Server p95 stayed below 5\,ms on all
-three replicas (the chart shows 4.8\,ms because 5\,ms is the smallest histogram bucket). Active requests stayed near 0. Client p95 went from 8.8 to 10.2\,ms (HTTP) and from 8.2 to 8.7\,ms
+three replicas (the chart shows 4.8\,ms because 5\,ms is the smallest histogram bucket). Active requests stayed near 0 on every replica (Envoy saw at most 1 at a time). Client p95 went from 8.8 to 10.2\,ms (HTTP) and from 8.2 to 8.7\,ms
 (gRPC). There were no errors.
 
 \expl Envoy follows the weights very closely. A weight only \emph{moves} traffic and does not add capacity. A could
 take twice the traffic here only because it had plenty of spare capacity. If A were the slowest replica, giving it
 weight 2 would make things worse, so weights should match each replica's real capacity.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \shot{d1-http-share.jpg}{HTTP share}
 \hfill
 \shot{d1-grpc-share.jpg}{gRPC share}
 \\[4pt]
 \shot{d1-http-p95.jpg}{HTTP p50 / p95: about the same on A, B and C}
-\caption{D.1 weighted round robin 2:1:1. Shares close to 50/25/25; response time unchanged.}
+\hfill
+\shot{d1-grpc-p95.jpg}{gRPC p50 / p95: about the same on A, B and C}
+\\[4pt]
+\shot{d1-http-active.jpg}{Active HTTP requests: 0 on each replica; Envoy saw at most 1}
+\caption{D.1 weighted round robin 2:1:1. Shares close to 50/25/25; response time and active requests unchanged.}
 \label{fig:d1}
 \end{figure}
 
@@ -316,14 +351,15 @@ and sends the request to the one with fewer requests in progress.
 is about 200\,ms. With least request, B is usually busy, so it gets fewer new requests. p95 only improves if B's
 share drops below 5\,\%.
 
-\obs (Figure~\ref{fig:d2})
+\obs (Figure~\ref{fig:d2} for HTTP, Figure~\ref{fig:d2grpc} for gRPC)
 \begin{itemize}
 \item \textbf{Round robin:} B kept 33.4\,\% (HTTP) and 33.3\,\% (gRPC). B had 1--3 requests in progress while A and C
 had 0. B's p95 was about 243\,ms, and client p95 was 209\,ms (HTTP) and 208\,ms (gRPC).
 \item \textbf{Least request:} B's share \textbf{fell to 19.7\,\% (HTTP) and 17.9\,\% (gRPC)}, and A and C took the
 rest. B served 355 instead of 601 HTTP requests and 322 instead of 600 gRPC calls. For gRPC, B's average number of
 active calls halved (1.3 $\to$ 0.7). For HTTP the 5-second samples stayed about the same (1.4), because a short Docker
-pause in that run held back 16 sends and then released them together. Client p95 was still 212\,ms (HTTP) and
+pause in that run held back sends and then released them together (the client recorded 16 late sends in this run
+and 0 in the other D.2 runs). Client p95 was still 212\,ms (HTTP) and
 208\,ms (gRPC), and p50 hardly changed (8.3 $\to$ 8.2\,ms HTTP, 7.5 $\to$ 7.1\,ms gRPC).
 \item There were no errors in any run.
 \end{itemize}
@@ -335,7 +371,7 @@ That is why its share fell to about a fifth, and the number of slow answers drop
 slowest 5\,\% were still B's 200\,ms answers and p95 did not move. p50 did not move either, because most requests were
 fast in both runs. With more load, or a stronger least-request setting, B's share would fall further.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \shot{d2rr-http-share.jpg}{Round robin: HTTP share (B 33\,\%)}
 \hfill
@@ -348,15 +384,31 @@ fast in both runs. With more load, or a stronger least-request setting, B's shar
 \shot{d2rr-http-p95.jpg}{Round robin: p50 / p95 (B about 243\,ms)}
 \hfill
 \shot{d2lr-http-p95.jpg}{Least request: p50 / p95 (B still slow)}
-\\[4pt]
-\shot{d2rr-grpc-share.jpg}{Round robin: gRPC share (B 33.5\,\%)}
-\hfill
-\shot{d2lr-grpc-share.jpg}{Least request: gRPC share (B 17.9\,\%)}
-\caption{D.2, B slowed by 200\,ms. Left: round robin. Right: least request with the same delay and workload. B's
-measured 243\,ms is slightly above the real 210\,ms because of the histogram bucket size.}
+\caption{D.2 \textbf{HTTP}, B slowed by 200\,ms. Left: round robin. Right: least request with the same delay and
+workload. B's measured 243\,ms is slightly above the real 210\,ms because of the histogram bucket size.}
 \label{fig:d2}
 \end{figure}
 
+\begin{figure}[!htbp]
+\centering
+\shot{d2rr-grpc-share.jpg}{Round robin: gRPC share (B 33.5\,\%)}
+\hfill
+\shot{d2lr-grpc-share.jpg}{Least request: gRPC share (B 17.9\,\%)}
+\\[4pt]
+\shot{d2rr-grpc-active.jpg}{Round robin: active gRPC calls (B up to 2, A and C about 0)}
+\hfill
+\shot{d2lr-grpc-active.jpg}{Least request: active gRPC calls (B at most 1)}
+\\[4pt]
+\shot{d2rr-grpc-p95.jpg}{Round robin: gRPC p50 / p95}
+\hfill
+\shot{d2lr-grpc-p95.jpg}{Least request: gRPC p50 / p95}
+\caption{D.2 \textbf{gRPC}, same delay and workload. B's handling time stays about 243\,ms in both runs; least
+request only sends it fewer calls. The first point for A and C in (f) is computed from only the first few calls of
+the run.}
+\label{fig:d2grpc}
+\end{figure}
+
+\FloatBarrier
 \subsection{D.3 Failure and recovery}
 
 Round robin, no delay, with the active health checks from Table~\ref{tab:hc}. During each 90-second run, B was
@@ -367,16 +419,44 @@ exact times from Envoy.
 one third of the requests fail. After B starts again, it needs 2 passed checks (about 2 to 4\,s) before it gets
 traffic again.
 
-\obs (Figure~\ref{fig:d3})
+\obs (Figure~\ref{fig:d3} and Table~\ref{tab:timeline}). The failure script read Envoy's \code{/clusters} page
+every 0.5\,s and saved each change with its time:
+
+\begin{table}[H]
+\centering\small
+\begin{tabular}{@{}l c c@{}}
+\toprule
+Event (seconds after the run started) & HTTP run & gRPC run \\
+\midrule
+\code{docker stop} sent to B & 20.1 & 20.1 \\
+B's container has stopped & 23.6 & 24.7 \\
+Envoy's health check marks B unhealthy (no more traffic to B) & \textbf{24.2} & \textbf{26.7} \\
+Docker's DNS no longer lists B & 27.6 & 27.8 \\
+\code{docker start} sent to B & 50.1 & 50.2 \\
+B's container is running again & 52.1 & 51.9 \\
+Envoy's health check marks B healthy (traffic to B again) & \textbf{61.0} & \textbf{55.9} \\
+\midrule
+Removal time (stop sent $\to$ unhealthy) & 4.2\,s & 6.7\,s \\
+Recovery time (start sent $\to$ healthy) & 10.9\,s & 5.7\,s \\
+\bottomrule
+\end{tabular}
+\caption{D.3 timeline recorded from Envoy (files \code{results/d3-failure-*-timeline.json}).}
+\label{tab:timeline}
+\end{table}
+
 \begin{itemize}
 \item \textbf{Removal:} B was marked unhealthy \textbf{4.2\,s} after the stop for HTTP and \textbf{6.7\,s} for gRPC.
-For gRPC, the stop signal reached B 1.5\,s late, and B finished its open calls for up to 2\,s before closing.
+In the gRPC run, B's container took longer to stop (4.6\,s instead of 3.5\,s), because on a stop signal B first
+finishes its open gRPC calls (up to 2\,s), so removal also took longer.
 \item \textbf{Errors:} the client saw \textbf{24 errors} for HTTP (1.33\,\%, all \code{503}) and \textbf{32 errors}
 for gRPC (1.78\,\%, all \code{UNAVAILABLE}). All of them happened \emph{before} B was removed. After that, A and C
 took about 10 requests per second each, with no errors.
-\item \textbf{Recovery:} B needed 7.6\,s (HTTP run) and 5.0\,s (gRPC run) just to start. Envoy then marked it healthy
-3.3\,s later in the HTTP run, which is 2 passed checks. In the gRPC run it took 0.7\,s, because Envoy needs only one
-passed check for a replica it has just re-added. No requests failed during recovery.
+\item \textbf{Recovery:} B's container was running about 2\,s after \code{docker start}, but the application inside
+needed longer to load. B's own log line ``replica started'' appeared 7.6\,s (HTTP run) and 5.0\,s (gRPC run) after the
+start command. Envoy then marked B healthy 3.3\,s later in the HTTP run (2 passed checks) and 0.7\,s later in the gRPC
+run (1 passed check). Because DNS had dropped B, Envoy treated it as a new endpoint when it came back, and Envoy marks
+a new endpoint healthy after its first passed check, so the healthy threshold of 2 does not always apply. No
+requests failed during recovery, because Envoy sends no traffic to B before it passes a check.
 \item Envoy's healthy-endpoint count went 3 $\to$ 2 $\to$ 3 in both runs. About 1--3\,s after the health check removed
 B, Docker's DNS also stopped listing B, so Envoy's \emph{total} endpoint count dropped to 2 as well. The health check
 was first in both runs.
@@ -384,10 +464,10 @@ was first in both runs.
 
 \expl How long removal takes is set by the health-check settings: about \emph{interval $\times$ unhealthy threshold},
 plus the timeout. The number of errors is that time multiplied by B's share of the traffic: about 6.7 requests per
-second for 4--5\,s gives 24--32 errors. Recovery is B's start-up time plus about 2 checks. A shorter interval, or one
+second for 4--5\,s gives 24--32 errors. Recovery is the time B's application needs to start, plus one or two checks. A shorter interval, or one
 retry for read-only requests, would reduce these errors; retries were turned off on purpose for this test.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \shot{d3-http-rate.jpg}{HTTP request rate: B drops out, A and C take over}
 \hfill
@@ -437,7 +517,7 @@ Every run sent 1800 requests; the number of failed requests is in brackets, and 
 time), I counted Envoy's own log events for that run in Kibana, grouped by replica (Figure~\ref{fig:split}). The
 result is \textbf{A 600, B 600, C 600}, the same as the client's count and Grafana's 33.3 / 33.3 / 33.4\,\%.
 
-\begin{figure}[H]
+\begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.85\textwidth]{figures/kibana-split.jpg}
 \caption{Kibana (ES|QL): Envoy access-log events for the round-robin HTTP run, counted per replica. The query is
@@ -451,9 +531,10 @@ STATS COUNT(*) BY replica}.}
 \begin{enumerate}[leftmargin=1.5em]
 \item \textbf{Which strategy would I choose?}
   \begin{itemize}
-  \item \textbf{HTTP: least request with active health checks.} When all replicas were healthy, it spread the load as
-  evenly as round robin. When B was slow, it sent about 40\,\% fewer requests to B, while round robin kept sending it
-  a full third. Health checks limited a crash to 1.3--1.8\,\% errors.
+  \item \textbf{HTTP: least request with active health checks.} When B was slow, least request sent 41\,\% fewer
+  requests to B, while round robin kept sending it a full third. I did not run least request with all replicas
+  healthy; with equally fast replicas I expect it to spread the load about evenly, like round robin. Health checks
+  limited a crash to 1.3--1.8\,\% errors.
   \item \textbf{gRPC: the same, but Envoy must use HTTP/2 for gRPC.} Through a plain TCP proxy, 100\,\% of the calls
   went to one replica, because a gRPC client uses one connection. With HTTP/2 the calls were spread evenly.
   \end{itemize}
@@ -472,8 +553,15 @@ few client requests. Response-time percentiles come from histogram buckets, so t
 bucket is 5\,ms. Active requests are only sampled every 5\,s.
 
 \textbf{Sources and reuse.} This work builds on my Assignment 1 (metrics, Grafana, ELK logging) and Assignment 2
-(REST API, gRPC service, idempotency, rate limiting). I used the Envoy documentation on load-balancing policies (round
-robin, weighted, least request) and on active health checking, and the gRPC Health Checking Protocol. The README of
-the repository has every command needed to repeat the runs, and the raw results are in the folder \code{results/}.
+(REST API, gRPC service, idempotency, rate limiting). I used these references:
+\begin{itemize}
+\item My Assignment 1 (as submitted): \url{https://github.com/zainabsbhutto02/petstore-observability/tree/ccfc05674771f15cab067597dbd56c827d0f769d}
+\item My Assignment 2 (as submitted): \url{https://github.com/zainabsbhutto02/petstore-observability/tree/ab16df7b18f1fc5433b512ceb7ca889e0faccb1a}
+\item Envoy load-balancing policies: \url{https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers}
+\item Envoy active health checking: \url{https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/health_checking}
+\item gRPC Health Checking Protocol: \url{https://github.com/grpc/grpc/blob/master/doc/health-checking.md}
+\end{itemize}
+The README of the repository has every command needed to repeat the runs, and the raw results are in the folder
+\code{results/}.
 
 \end{document}

@@ -727,6 +727,20 @@ curl.exe -s http://localhost:9901/clusters | Select-String "::health_flags::"
 Per-replica counts from Envoy's access log, server-side p95 and active requests for every run are in
 `results/summary.md`; the D.3 timelines (stop, unhealthy, restart, healthy) are in `results/*-timeline.json`.
 
+## Report
+
+* **`Assignment3_report.pdf`** (in this folder): the Assignment 3 report - architecture and shared state,
+  health-check settings, metric/query details, baselines, all experiments, results table, the two proxy/backend
+  log examples and conclusions. Every chart is a screenshot of the Grafana dashboard above for that run's own
+  time window.
+* **`report/`**: the LaTeX source (`assignment3-report.tex`) and the screenshots (`report/figures/`). To rebuild
+  the PDF without installing LaTeX:
+
+```powershell
+docker build -t petstore-a3-latex report
+docker run --rm -v "${PWD}/report:/doc" petstore-a3-latex     # writes report/assignment3-report.pdf
+```
+
 ## Tests
 
 The A2 test command still works and all 45 tests pass (the gRPC health service is optional, so the tests do
